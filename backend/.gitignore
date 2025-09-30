@@ -1,0 +1,15 @@
+# Backend-specific ignores
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+.env
+*.log
+
+# Usage logs (kept locally)
+usage/*
+!usage/.gitkeep
+

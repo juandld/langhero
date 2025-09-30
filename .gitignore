@@ -1,0 +1,53 @@
+# Root gitignore for LangHero
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Env files
+.env
+*.env
+backend/.env
+frontend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+backend/venv/
+backend/.venv/
+
+# Node / SvelteKit
+node_modules/
+**/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.vite/
+dist/
+build/
+
+# Logs / coverage
+*.log
+.coverage
+coverage.xml
+htmlcov/
+
+# App data (kept locally, not in git)
+voice_notes/*
+!voice_notes/.gitkeep
+transcriptions/*
+!transcriptions/.gitkeep
+narratives/*
+!narratives/.gitkeep
+backend/usage/*
+!backend/usage/.gitkeep
+examples_audio/*
+!examples_audio/.gitkeep
+
