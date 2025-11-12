@@ -12,7 +12,9 @@ for logger_name in loggers_to_silence:
     # Use ERROR to reduce noisy quota retry warnings
     logging.getLogger(logger_name).setLevel(logging.ERROR)
 
-from fastapi import FastAPI, File, UploadFile, Form, Response, Request, BackgroundTasks
+import json
+
+from fastapi import FastAPI, File, UploadFile, Form, Response, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from services import (
@@ -39,6 +41,8 @@ import asyncio
 from langchain_core.messages import HumanMessage
 import providers
 import config
+from mock_stream import build_session, MockStreamingSession
+from streaming import create_session, StreamingSession
 
 app = FastAPI()
 
@@ -69,6 +73,154 @@ os.makedirs(VOICE_NOTES_DIR, exist_ok=True)
 os.makedirs(EXAMPLES_DIR, exist_ok=True)
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 app.mount("/examples", StaticFiles(directory=EXAMPLES_DIR), name="examples")
+
+
+@app.websocket("/stream/mock")
+async def mock_stream_endpoint(websocket: WebSocket):
+    """Mock streaming endpoint that echoes chunk metadata and fake transcripts."""
+    await websocket.accept()
+
+    session: MockStreamingSession = build_session({})
+    pending_chunk: bytes | None = None
+    reason = "client_stop"
+
+    try:
+        first_message = await websocket.receive()
+    except WebSocketDisconnect:
+        return
+
+    msg_type = first_message.get("type")
+    if msg_type == "websocket.receive":
+        text_payload = first_message.get("text")
+        bytes_payload = first_message.get("bytes")
+        if text_payload is not None:
+            try:
+                payload = json.loads(text_payload)
+                if isinstance(payload, dict):
+                    session = build_session(payload)
+            except json.JSONDecodeError:
+                # Treat non-JSON text as an info message after ready event
+                pending_chunk = None
+            else:
+                pending_chunk = None
+        elif bytes_payload is not None:
+            pending_chunk = bytes_payload
+    elif msg_type == "websocket.disconnect":
+        return
+
+    await websocket.send_json(session.ready_event())
+
+    if pending_chunk is not None:
+        await websocket.send_json(session.register_chunk(pending_chunk))
+
+    try:
+        while True:
+            message = await websocket.receive()
+            msg_type = message.get("type")
+
+            if msg_type == "websocket.receive":
+                if message.get("bytes") is not None:
+                    chunk = message.get("bytes") or b""
+                    event = session.register_chunk(chunk)
+                    await websocket.send_json(event)
+                elif message.get("text") is not None:
+                    text = (message.get("text") or "").strip()
+                    lowered = text.lower()
+                    if lowered in {"stop", "done", "finish"}:
+                        reason = f"client_{lowered}"
+                        break
+                    await websocket.send_json(
+                        {
+                            "event": "info",
+                            "message": text,
+                        }
+                    )
+            elif msg_type == "websocket.disconnect":
+                reason = "disconnect"
+                break
+    except WebSocketDisconnect:
+        reason = "disconnect"
+
+    await websocket.send_json(session.final_event(reason=reason))
+    await websocket.close()
+
+
+@app.websocket("/stream/interaction")
+async def interaction_stream_endpoint(websocket: WebSocket):
+    """Real streaming endpoint: emits partial transcripts, penalties, and final results."""
+    await websocket.accept()
+    session: StreamingSession = create_session({})
+    pending_chunk: bytes | None = None
+
+    try:
+        first_message = await websocket.receive()
+    except WebSocketDisconnect:
+        return
+
+    msg_type = first_message.get("type")
+    if msg_type == "websocket.receive":
+        text_payload = first_message.get("text")
+        bytes_payload = first_message.get("bytes")
+        if text_payload is not None:
+            try:
+                payload = json.loads(text_payload)
+                if isinstance(payload, dict):
+                    session = create_session(payload)
+            except json.JSONDecodeError:
+                # treat text as command after ready phase
+                pass
+        elif bytes_payload is not None:
+            pending_chunk = bytes_payload
+    elif msg_type == "websocket.disconnect":
+        return
+
+    await websocket.send_json(
+        {
+            "event": "ready",
+            "scenario_id": session.scenario_id,
+            "target_language": session.target_language,
+            "lives_total": session.lives_total,
+            "lives_remaining": session.lives_remaining,
+            "score": session.score,
+        }
+    )
+
+    if pending_chunk:
+        await session.append_chunk(pending_chunk, websocket)
+
+    try:
+        while True:
+            message = await websocket.receive()
+            msg_type = message.get("type")
+            if msg_type == "websocket.receive":
+                if message.get("bytes") is not None:
+                    chunk = message.get("bytes") or b""
+                    await session.append_chunk(chunk, websocket)
+                elif message.get("text") is not None:
+                    text = (message.get("text") or "").strip().lower()
+                    if text in {"stop", "done", "finish"}:
+                        await session.finalize(websocket)
+                        break
+                    elif text in {"reset"}:
+                        session = create_session({})
+                        await websocket.send_json(
+                            {
+                                "event": "reset",
+                                "scenario_id": session.scenario_id,
+                                "target_language": session.target_language,
+                                "lives_total": session.lives_total,
+                                "lives_remaining": session.lives_remaining,
+                                "score": session.score,
+                            }
+                        )
+                    else:
+                        await websocket.send_json({"event": "info", "message": text})
+            elif msg_type == "websocket.disconnect":
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await websocket.close()
 
 @app.on_event("startup")
 async def startup_event():

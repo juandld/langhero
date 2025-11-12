@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 import uuid
@@ -20,6 +22,9 @@ import usage_log as usage
 import subprocess
 import tempfile
 import re
+
+DEFAULT_SUCCESS_POINTS = 10
+DEFAULT_FAILURE_LIFE_COST = 1
 
 # Load environment variables from .env file
 load_dotenv()
@@ -370,6 +375,38 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
         if not lang:
             lang = current_scenario.get("language") or ("Japanese" if current_scenario.get("character_dialogue_jp") else "English")
 
+        def _coerce_int(value, default):
+            try:
+                return max(0, int(value))
+            except Exception:
+                return default
+
+        reward_points = _coerce_int(
+            current_scenario.get("reward_points")
+            or current_scenario.get("points")
+            or current_scenario.get("success_points"),
+            DEFAULT_SUCCESS_POINTS,
+        )
+        penalties_cfg = current_scenario.get("penalties") or {}
+        incorrect_cfg = penalties_cfg.get("incorrect_answer") or {}
+        failure_lives = _coerce_int(
+            incorrect_cfg.get("lives")
+            or incorrect_cfg.get("life")
+            or incorrect_cfg.get("health")
+            or incorrect_cfg.get("count"),
+            DEFAULT_FAILURE_LIFE_COST,
+        )
+        language_cfg = penalties_cfg.get("language_mismatch") or {}
+        language_failure_lives = _coerce_int(
+            language_cfg.get("lives")
+            or language_cfg.get("life")
+            or language_cfg.get("health")
+            or language_cfg.get("count"),
+            failure_lives or DEFAULT_FAILURE_LIFE_COST,
+        )
+
+        success = False
+
         def _contains_japanese(text: str) -> bool:
             try:
                 for ch in text:
@@ -389,11 +426,15 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 for option in current_scenario.get("options", []):
                     if "yes" in (option.get("text") or "").lower():
                         next_scenario_id = option.get("next_scenario")
+                        if next_scenario_id is not None:
+                            success = True
                         break
             if not next_scenario_id and any(k in transcribed_text for k in ["no", "not", "nope", "nah"]):
                 for option in current_scenario.get("options", []):
                     if "no" in (option.get("text") or "").lower():
                         next_scenario_id = option.get("next_scenario")
+                        if next_scenario_id is not None:
+                            success = True
                         break
 
         # Japanese quick pass: はい/うん → yes, いいえ/いや → no
@@ -403,11 +444,15 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 for option in current_scenario.get("options", []):
                     if "yes" in (option.get("text") or "").lower():
                         next_scenario_id = option.get("next_scenario")
+                        if next_scenario_id is not None:
+                            success = True
                         break
             if not next_scenario_id and any(tok in raw for tok in ["いいえ", "いや", "いえ", "ノー"]):
                 for option in current_scenario.get("options", []):
                     if "no" in (option.get("text") or "").lower():
                         next_scenario_id = option.get("next_scenario")
+                        if next_scenario_id is not None:
+                            success = True
                         break
 
         # Japanese polite acceptance (e.g., お願いします/ください) → often implies affirmative
@@ -417,6 +462,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 for option in current_scenario.get("options", []):
                     if "yes" in (option.get("text") or "").lower():
                         next_scenario_id = option.get("next_scenario")
+                        if next_scenario_id is not None:
+                            success = True
                         break
 
         # Scenario-specific keyword/example matching
@@ -453,7 +500,10 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                             best_score = score
                             best_idx = idx
                 if best_idx >= 0 and best_score >= 0.6:
-                    next_scenario_id = current_scenario["options"][best_idx].get("next_scenario")
+                    next_scenario = current_scenario["options"][best_idx]
+                    next_scenario_id = next_scenario.get("next_scenario")
+                    if next_scenario_id is not None:
+                        success = True
             except Exception:
                 pass
 
@@ -471,6 +521,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 "heard": heard_raw,
                 "npcDoesNotUnderstand": True,
                 "message": "Please say it in Japanese.",
+                "scoreDelta": 0,
+                "livesDelta": -language_failure_lives,
             }
             if jp:
                 out["repeatExpected"] = jp
@@ -523,6 +575,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 choice = int(m.group(1)) if m else 0
                 if 1 <= choice <= len(opts):
                     next_scenario_id = opts[choice - 1].get("next_scenario")
+                    if next_scenario_id is not None:
+                        success = True
             except Exception:
                 try:
                     # Fallback to OpenAI if configured
@@ -533,6 +587,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                     choice = int(m.group(1)) if m else 0
                     if 1 <= choice <= len(opts):
                         next_scenario_id = opts[choice - 1].get("next_scenario")
+                        if next_scenario_id is not None:
+                            success = True
                 except Exception:
                     pass
 
@@ -562,21 +618,34 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                                 "repeatExpected": expected,
                                 "pronunciation": pron,
                                 "repeatNextScenario": yes_opt.get("next_scenario"),
+                                "scoreDelta": 0,
+                                "livesDelta": -language_failure_lives,
                             }
                 except Exception:
                     pass
             # Return heard text so UI can display it; signal that it didn't match
-            return {"error": "Could not determine intent from speech.", "heard": heard_raw}
+            return {
+                "error": "Could not determine intent from speech.",
+                "heard": heard_raw,
+                "scoreDelta": 0,
+                "livesDelta": -failure_lives,
+            }
 
         # 4. Determine Next Scenario
+        success = True
         next_scenario = get_scenario_by_id(next_scenario_id)
         if not next_scenario:
-            return {"error": "Next scenario not found", "heard": heard_raw}
-            
-        return {"nextScenario": next_scenario, "heard": heard_raw}
+            return {"error": "Next scenario not found", "heard": heard_raw, "scoreDelta": 0, "livesDelta": 0}
+        
+        return {
+            "nextScenario": next_scenario,
+            "heard": heard_raw,
+            "scoreDelta": reward_points if success else 0,
+            "livesDelta": 0,
+        }
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e), "scoreDelta": 0, "livesDelta": 0}
     finally:
         # 5. Clean up the temporary file
         if os.path.exists(temp_path):

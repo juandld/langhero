@@ -55,3 +55,29 @@ export async function discoverBackend(candidates?: string[]): Promise<string> {
   setBackendUrl(base);
   return base;
 }
+
+export type StreamMode = "off" | "mock" | "real";
+
+export function getStreamMode(): StreamMode {
+  let mode: StreamMode = "real";
+  try {
+    if (typeof window === 'undefined') return mode;
+    const params = new URLSearchParams(window.location.search);
+    const qp = params.get('stream') ?? params.get('streamMode') ?? params.get('mockStream');
+    if (qp) {
+      const lowered = qp.toLowerCase();
+      if (lowered === 'mock') mode = 'mock';
+      else if (lowered === 'off' || lowered === '0' || lowered === 'false') mode = 'off';
+      else mode = 'real';
+      window.localStorage.setItem('STREAM_MODE', mode);
+      return mode;
+    }
+    const stored = window.localStorage.getItem('STREAM_MODE');
+    if (stored === 'mock' || stored === 'off' || stored === 'real') {
+      mode = stored as StreamMode;
+    }
+  } catch (_) {
+    mode = "real";
+  }
+  return mode;
+}

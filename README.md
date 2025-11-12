@@ -10,6 +10,19 @@ An interactive learning app (separated from Narrative Hero) that runs branching 
 - Notes API with tags, filtering fields, and narrative generation (backend)
 - Simple scenario store loaded from JSON (frontend and backend)
 
+## MVP Scope
+
+Focus for the first playable slice:
+
+- **Two guided scenarios**: one beginner (time-stop) and one advanced (streaming) that share the same reward/penalty contract via `reward_points` and `penalties.*` in scenario JSON.
+- **Score & lives HUD**: the streaming WebSocket and the `/narrative/interaction` POST both emit `scoreDelta`/`livesDelta`; the Svelte UI mirrors those updates immediately.
+- **Language coaching**: speaking in the wrong language triggers a retry prompt with life loss and a recommended line.
+- **Regression tests**: pytest suites cover scoring/lives logic for both time-stop and streaming paths (`tests/process_interaction_test.py`, `tests/streaming_session_test.py`).
+- **Next up (testing)**: add Vitest-based HUD/store tests, Playwright smoke runs, and a provider harness to benchmark streaming latency.
+- Streaming auto-finalizes once the learner’s partial transcript confidently matches a scenario option; manual “stop” remains as a fallback.
+
+Nice-to-haves after the MVP lands: streaming auto-finalize when confidence is high, confidence meter visuals, and Cypress/Playwright end-to-end smoke tests.
+
 ## Tech Stack
 
 - Frontend: SvelteKit (TypeScript)
@@ -114,6 +127,12 @@ From project root:
     The frontend will be available at `http://localhost:5173`.
     Backend URL is configured in `frontend/src/lib/config.ts`.
 
+## Testing
+
+- Run `tests/test.sh` from the repo root to exercise the current streaming loop integration tests. The script picks a compatible Python (3.10+) and expects the FastAPI dependencies from `backend/requirements.txt`.
+- The harness invokes `pytest` (configured in `pytest.ini`) and installs any extra tooling listed in `tests/requirements.txt` when needed.
+- The streaming mock harness used in tests aligns with Milestone M1; as additional milestones land, extend the script so we keep regression coverage close to the plan.
+
 ## Project Structure
 
 - `frontend/` SvelteKit app (scenario demo UI and components)
@@ -186,6 +205,40 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
 - `frontend/src/lib/config.ts` hosts `BACKEND_URL` (default `http://localhost:8000`).
 - You can set per‑scenario language by adding `language` to each scenario; the frontend passes it to the backend for better transcription.
 
+## Development Playbook
+
+- High-level product direction lives in `ROADMAP.md`.
+- Detailed design and engineering notes live under `development/`. Start with `development/README.md` for the latest index and action items.
+- When you open a new plan or retire one, cross-link it in the development index so decisions stay connected.
+
+### Planning Docs
+
+- [development/ux.md](development/ux.md) — UX vision, including how time-stop versus streaming states should feel.
+- [development/scenario-progression.md](development/scenario-progression.md) — schema changes and rules for moving learners between modes.
+- [development/streaming-plan.md](development/streaming-plan.md) — WebSocket architecture, provider audit, and telemetry expectations.
+- [development/testable-milestones.md](development/testable-milestones.md) — running checklist of engineering milestones and associated tests.
+- [development/open-questions.md](development/open-questions.md) — research topics awaiting decisions; add owners as answers appear.
+
+### Milestones Snapshot
+
+- **M1 Mock Streaming Loop** (done) FastAPI WebSocket echo path with mocked transcript; dev-only UI flag to preview.
+- **M2 Provider Shoot-out Harness** (planned) Stand up adapters and latency benchmarks for Gemini/OpenAI/Whisper and log results to `development/notes/provider-benchmarks.md` once that scratchpad file exists.
+- **M3 Streaming Transcript Prototype** (done) Replace mocks with real streaming provider and surface live transcript in the HUD.
+- **M4 Scenario Mode Toggle** (up next) Extend scenario JSON with `mode`, propagate through backend responses, and swap frontend controls based on mode.
+- **M5 Confidence & Lives Feedback** (up next) Deliver confidence meter, lives UI, and logging for retries/success.
+- **M6 Production Hardening** (up next) Add reconnection logic, rate limiting, health checks, and document deployment checklists.
+
+Feel free to mark progress directly in `development/testable-milestones.md` as items land—tests and docs should move in lockstep.
+
+### Open Questions To Track
+
+- Streaming ASR provider trade-offs (latency, reliability, cost) and whether on-device fallback is needed.
+- Privacy posture for storing streaming transcripts.
+- UX treatments for communicating lives/confidence in live mode.
+- Teacher/coach overrides for difficulty in real time.
+
+Capture updates in [development/open-questions.md](development/open-questions.md) so we can resolve, assign owners, or archive decisions.
+
 ## Generate Scenarios from a Video
 
 Backend can create a simple branching scenario from a video URL using FFmpeg + LLM:
@@ -212,3 +265,11 @@ Notes:
 - Add OpenAI key for reliable fallback (transcribe/title and narrative generation)
 - To reprocess a note, use `/api/notes/{filename}/retry` or delete its JSON; backend will recreate it on startup or next upload
 - FFmpeg with pydub improves audio format handling (pydub installed; add FFmpeg if needed)
+
+## Scenario Progression UX
+
+- See [development/scenario-progression.md](development/scenario-progression.md) for the latest rules and guardrails.
+- **Early levels:** Players can pause (press-and-hold mic) to plan, translate, and rehearse before speaking. Audio is processed while they hold the button; releasing it commits the attempt. Limited “lives” per scenario emphasize accuracy.
+- **Advanced levels:** The time-stop advantage disappears. Streaming kicks in as soon as the learner speaks, requiring faster recall and making live comprehension the core skill. Planning tools remain, but they must be used on the fly.
+- This progression helps learners transition from deliberate practice to real-time conversation under gentle pressure.
+- Scoring/lives: scenarios now specify `mode`, `lives`, `reward_points`, and `penalties` (e.g., `incorrect_answer.lives`, `language_mismatch.points`). Both the WebSocket stream and `/narrative/interaction` respond with `scoreDelta` / `livesDelta`, keeping the HUD in sync across modes.

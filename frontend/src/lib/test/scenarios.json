@@ -4,6 +4,13 @@
     "description": "The chef asks if you're hungry. How do you respond?",
     "character_dialogue_jp": "いらっしゃいませ！",
     "character_dialogue_en": "Welcome!",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 10,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 10 }
+    },
     "options": [
       {
         "style": "polite",
@@ -44,6 +51,13 @@
     "description": "The chef serves the ramen. How do you respond?",
     "character_dialogue_jp": "素晴らしい！当店自慢のラーメン一杯、お待ちどうさま！",
     "character_dialogue_en": "Excellent! One bowl of our finest ramen, coming up!",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 10,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 10 }
+    },
     "options": [
       { "style": "polite", "text": "Thank you!", "next_scenario": 4,
         "examples": [{"native": "Thank you!", "target": "ありがとうございます。", "pronunciation": "Arigatou gozaimasu."}] },
@@ -56,6 +70,13 @@
     "description": "You politely decline. The chef nods.",
     "character_dialogue_jp": "そうですか。またの機会にどうぞ。",
     "character_dialogue_en": "I see. Please come again.",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 10,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 10 }
+    },
     "options": [
       { "style": "polite", "text": "Say goodbye politely", "next_scenario": 6,
         "examples": [{"native": "Goodbye.", "target": "失礼します。", "pronunciation": "Shitsurei shimasu."}] }
@@ -66,6 +87,13 @@
     "description": "You received the ramen and thanked the chef.",
     "character_dialogue_jp": "どうぞ召し上がれ！",
     "character_dialogue_en": "Please enjoy!",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
     "options": [
       { "style": "polite", "text": "It's delicious!", "next_scenario": 5,
         "examples": [{"native": "It's delicious!", "target": "おいしいです！", "pronunciation": "Oishii desu!"}] },
@@ -78,6 +106,13 @@
     "description": "You compliment the ramen.",
     "character_dialogue_jp": "ありがとうございます！",
     "character_dialogue_en": "Thank you!",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
     "options": [
       { "style": "polite", "text": "Ask for extra egg", "next_scenario": 7,
         "examples": [{"native": "An extra egg, please.", "target": "味玉をください。", "pronunciation": "Ajitama o kudasai."}] },
@@ -90,6 +125,13 @@
     "description": "You say goodbye and leave.",
     "character_dialogue_jp": "またお待ちしています！",
     "character_dialogue_en": "Hope to see you again!",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
     "options": []
   },
   {
@@ -97,6 +139,13 @@
     "description": "The chef responds to your request.",
     "character_dialogue_jp": "かしこまりました。少々お待ちください。",
     "character_dialogue_en": "Certainly. One moment, please.",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
     "options": [
       { "style": "polite", "text": "Thank you", "next_scenario": 8,
         "examples": [{"native": "Thank you.", "target": "ありがとうございます。", "pronunciation": "Arigatou gozaimasu."}] }
@@ -107,6 +156,13 @@
     "description": "You pay and finish the meal.",
     "character_dialogue_jp": "ありがとうございました！",
     "character_dialogue_en": "Thank you very much!",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
     "options": []
   }
 ]

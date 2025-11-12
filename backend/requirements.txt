@@ -9,3 +9,4 @@ langchain-openai
 langchain-community
 pydub
 openai
+websockets
