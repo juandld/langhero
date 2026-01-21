@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-  <title>Learn - Narrative Hero</title>
+  <title>Learn - LangHero</title>
 </svelte:head>
 
 <div class="learn-page-container">

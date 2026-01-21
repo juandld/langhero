@@ -9,7 +9,9 @@ and easier to scan.
 from __future__ import annotations
 
 import io
-from typing import List, Optional, Tuple
+from base64 import b64encode
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 import logging
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -46,24 +48,167 @@ def is_rate_limit_error(e: Exception) -> bool:
     )
 
 
-def should_google_fallback(e: Exception) -> bool:
-    s = str(e).lower()
-    return is_rate_limit_error(e) or (
-        "no google gemini api keys configured" in s
-        or "unauthorized" in s
-        or "permission" in s
-        or "invalid api key" in s
-        or "not found" in s
-        or "publisher model" in s
-    )
-
-
-def key_label_from_index(index: int) -> str:
+def key_label_from_index(index: int, keys: Optional[List[str]] = None) -> str:
+    keys = keys if keys is not None else GOOGLE_KEYS
     try:
-        key = GOOGLE_KEYS[index]
+        key = keys[index]
     except Exception:
         return f"gemini_key_{index}"
     return f"gemini_key_{index}_{key[-4:] if key else '????'}"
+
+
+@dataclass
+class TranscriptionResult:
+    text: str
+    provider: str
+    model: str
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+
+# Transcription contexts
+CONTEXT_INTERACTION = "interaction"
+CONTEXT_STREAMING = "streaming"
+CONTEXT_TRANSLATE = "translate"
+CONTEXT_IMITATE = "imitate"
+CONTEXT_NOTES = "notes"
+
+_ALL_CONTEXTS = {
+    CONTEXT_INTERACTION,
+    CONTEXT_STREAMING,
+    CONTEXT_TRANSLATE,
+    CONTEXT_IMITATE,
+    CONTEXT_NOTES,
+}
+
+
+def _available_providers() -> List[str]:
+    providers: List[str] = []
+    if GOOGLE_KEYS:
+        providers.append("gemini")
+    if config.OPENAI_API_KEY:
+        providers.append("openai")
+    return providers
+
+
+def _expand_provider_order(prefs: List[str]) -> List[str]:
+    order: List[str] = []
+    available = _available_providers()
+    if not available:
+        return order
+    tokens = prefs or ["auto"]
+    for token in tokens:
+        if token == "auto":
+            for prov in available:
+                if prov not in order:
+                    order.append(prov)
+            continue
+        if token in available and token not in order:
+            order.append(token)
+    if not order:
+        order.extend(available)
+    return order
+
+
+def _provider_order_for_context(context: str) -> List[str]:
+    prefs = config.TRANSCRIBE_PROVIDER_OVERRIDES.get(context) or []
+    if not prefs:
+        prefs = config.TRANSCRIBE_PROVIDER_DEFAULT
+    order = _expand_provider_order(prefs)
+    if not order:
+        raise RuntimeError("No transcription providers available. Configure API keys or provider preferences.")
+    return order
+
+
+def _mime_from_ext(file_ext: str) -> str:
+    ext = (file_ext or "").lower()
+    return {
+        "webm": "audio/webm",
+        "ogg": "audio/ogg",
+        "mp3": "audio/mp3",
+        "m4a": "audio/mp4",
+        "wav": "audio/wav",
+    }.get(ext, "audio/wav")
+
+
+def _transcribe_with_gemini(
+    audio_bytes: bytes,
+    instructions: str,
+    mime_type: str,
+    model: Optional[str] = None,
+) -> TranscriptionResult:
+    message = HumanMessage(
+        content=[
+            {"type": "text", "text": instructions},
+            {
+                "type": "file",
+                "source_type": "base64",
+                "mime_type": mime_type,
+                "data": b64encode(audio_bytes).decode("utf-8"),
+            },
+        ]
+    )
+    response, key_index = invoke_google([message], model=model)
+    text = str(getattr(response, "content", response))
+    return TranscriptionResult(
+        text=text,
+        provider="gemini",
+        model=model or config.GOOGLE_MODEL,
+        meta={"key_index": key_index},
+    )
+
+
+def _transcribe_with_openai_result(
+    audio_bytes: bytes,
+    file_ext: str,
+    language: Optional[str],
+    prompt: Optional[str],
+) -> TranscriptionResult:
+    text = transcribe_with_openai(audio_bytes, file_ext=file_ext, language=language, prompt=prompt)
+    return TranscriptionResult(
+        text=text,
+        provider="openai",
+        model=config.OPENAI_TRANSCRIBE_MODEL,
+    )
+
+
+def transcribe_audio(
+    audio_bytes: bytes,
+    *,
+    file_ext: str = "webm",
+    mime_type: Optional[str] = None,
+    instructions: Optional[str] = None,
+    language_hint: Optional[str] = None,
+    context: str = CONTEXT_INTERACTION,
+) -> TranscriptionResult:
+    if context not in _ALL_CONTEXTS:
+        # Allow custom contexts but treat as default
+        order = _expand_provider_order(config.TRANSCRIBE_PROVIDER_DEFAULT)
+    else:
+        order = _provider_order_for_context(context)
+    if not order:
+        raise RuntimeError("No transcription providers configured.")
+    instruction_text = instructions or "Transcribe this audio recording."
+    mime = mime_type or _mime_from_ext(file_ext)
+    last_err: Optional[Exception] = None
+    for provider_name in order:
+        try:
+            if provider_name == "gemini":
+                return _transcribe_with_gemini(audio_bytes, instruction_text, mime)
+            if provider_name == "openai":
+                return _transcribe_with_openai_result(
+                    audio_bytes,
+                    file_ext=file_ext,
+                    language=language_hint,
+                    prompt=instruction_text if instruction_text else None,
+                )
+            raise RuntimeError(f"Unsupported transcription provider '{provider_name}'")
+        except Exception as exc:  # noqa: PERF203
+            last_err = exc
+            logger.warning("Transcription via %s failed: %s", provider_name, exc)
+            continue
+    if last_err:
+        raise last_err
+    raise RuntimeError("No transcription providers succeeded.")
 
 
 def invoke_google(messages: List[HumanMessage], model: str | None = None) -> Tuple[object, int]:
@@ -177,7 +322,12 @@ def normalize_title_output(raw: str) -> str:
         return "Untitled"
 
 
-def transcribe_with_openai(audio_bytes: bytes, file_ext: str = "wav", language: Optional[str] = None) -> str:
+def transcribe_with_openai(
+    audio_bytes: bytes,
+    file_ext: str = "wav",
+    language: Optional[str] = None,
+    prompt: Optional[str] = None,
+) -> str:
     """Transcribe audio using OpenAI Whisper via the official SDK.
 
     This avoids version mismatches in LangChain parsers and works reliably with bytes.
@@ -193,14 +343,14 @@ def transcribe_with_openai(audio_bytes: bytes, file_ext: str = "wav", language: 
         "file": bio,
         "response_format": "text",
     }
-    # Map common language names to codes when possible
-    lang = (language or "").strip().lower()
-    if lang in ("japanese", "ja"):
-        kwargs["language"] = "ja"
-    elif lang:
-        # If a caller passes a code directly, accept it
-        if len(lang) <= 5 and lang.replace("-", "").isalpha():
-            kwargs["language"] = lang
+    hint = (language or "").strip()
+    if prompt:
+        kwargs["prompt"] = prompt
+    elif hint:
+        kwargs["prompt"] = (
+            f"The speaker may be using {hint}. Transcribe in the language actually spoken using its usual writing system. "
+            "Do not translate."
+        )
     resp = client.audio.transcriptions.create(**kwargs)
     return resp if isinstance(resp, str) else getattr(resp, "text", "")
 

@@ -10,7 +10,9 @@ import scenarios from '$lib/test/scenarios.json';
  * @property {Record<string, Record<string, number>>} [penalties]
  */
 
-const DEFAULT_SCENARIO = /** @type {Scenario} */ (scenarios[0]);
+const BUILTIN_SCENARIOS = /** @type {Scenario[]} */ (scenarios);
+let activeScenarios = BUILTIN_SCENARIOS;
+let defaultScenario = /** @type {Scenario} */ (activeScenarios[0]);
 
 /**
  * Ensure mode, lives, reward, and penalties are present with sensible defaults.
@@ -32,9 +34,26 @@ function normalizeScenario(raw) {
 }
 
 function createStoryStore() {
-  const { subscribe, set } = writable(normalizeScenario(DEFAULT_SCENARIO));
+  const { subscribe, set } = writable(normalizeScenario(defaultScenario));
   /** @type {number[]} */
   let history = [];
+
+  /**
+   * @param {Scenario[] | unknown} list
+   * @returns {Scenario[]}
+   */
+  const coerceScenarioList = (list) => {
+    if (!Array.isArray(list)) return [];
+    /** @type {Scenario[]} */
+    const out = [];
+    for (const item of list) {
+      if (item && typeof item === 'object' && typeof item.id === 'number') {
+        out.push(/** @type {Scenario} */ (item));
+      }
+    }
+    out.sort((a, b) => (a.id || 0) - (b.id || 0));
+    return out;
+  };
 
   return {
     subscribe,
@@ -43,7 +62,7 @@ function createStoryStore() {
      * @param {number} id
      */
     goToScenario: (id) => {
-      const nextScenario = /** @type {Scenario | undefined} */ (scenarios.find((s) => s.id === id));
+      const nextScenario = /** @type {Scenario | undefined} */ (activeScenarios.find((s) => s.id === id));
       if (!nextScenario) {
         console.error(`Scenario with id ${id} not found.`);
         return;
@@ -60,12 +79,37 @@ function createStoryStore() {
     goBack: () => {
       const prevId = history.pop();
       if (typeof prevId !== 'number') return;
-      const prevScenario = /** @type {Scenario | undefined} */ (scenarios.find((s) => s.id === prevId));
+      const prevScenario = /** @type {Scenario | undefined} */ (activeScenarios.find((s) => s.id === prevId));
       if (prevScenario) set(normalizeScenario(prevScenario));
     },
     reset: () => {
       history = [];
-      set(normalizeScenario(DEFAULT_SCENARIO));
+      set(normalizeScenario(defaultScenario));
+    },
+    /**
+     * Load a new scenario list (e.g., imported story) and jump to its first scenario.
+     * @param {Scenario[] | unknown} list
+     * @param {{ startId?: number }} [opts]
+     */
+    loadScenarios: (list, opts = {}) => {
+      const next = coerceScenarioList(list);
+      if (!next.length) {
+        console.error('loadScenarios: empty list');
+        return;
+      }
+      activeScenarios = next;
+      defaultScenario = /** @type {Scenario} */ (activeScenarios[0]);
+      history = [];
+      const startId = typeof opts?.startId === 'number' ? opts.startId : defaultScenario.id;
+      const startScenario = /** @type {Scenario | undefined} */ (activeScenarios.find((s) => s.id === startId)) || defaultScenario;
+      set(normalizeScenario(startScenario));
+    },
+    /** Switch back to the built-in demo scenarios. */
+    useBuiltInScenarios: () => {
+      activeScenarios = BUILTIN_SCENARIOS;
+      defaultScenario = /** @type {Scenario} */ (activeScenarios[0]);
+      history = [];
+      set(normalizeScenario(defaultScenario));
     },
   };
 }

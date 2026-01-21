@@ -38,12 +38,14 @@ class MockStreamingSession:
     lives_total: int = 3
     lives_remaining: int = 3
     score: int = 0
+    mode: str = "advanced"
 
     def ready_event(self) -> Dict[str, Any]:
         return {
             "event": "ready",
             "scenario_id": self.scenario_id,
             "language": self.language,
+            "mode": self.mode,
             "lives_total": self.lives_total,
             "lives_remaining": self.lives_remaining,
             "score": self.score,
@@ -74,6 +76,7 @@ class MockStreamingSession:
             "reason": reason,
             "scenario_id": self.scenario_id,
             "language": self.language,
+            "mode": self.mode,
             "lives_total": self.lives_total,
             "lives_remaining": self.lives_remaining,
             "score": self.score,
@@ -84,8 +87,11 @@ def build_session(payload: Optional[Dict[str, Any]]) -> MockStreamingSession:
     payload = payload or {}
     scenario_id = payload.get("scenario_id") or payload.get("session_id")
     language = payload.get("language") or payload.get("lang")
+    raw_mode = payload.get("mode") or "advanced"
+    mode = raw_mode.strip().lower() if isinstance(raw_mode, str) and raw_mode.strip() else "advanced"
     session = MockStreamingSession(
         scenario_id=scenario_id,
         language=language,
+        mode=mode,
     )
     return session

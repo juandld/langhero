@@ -8,12 +8,10 @@ import asyncio
 import wave
 import contextlib
 from datetime import datetime
+import time
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
-from langchain_community.document_loaders.parsers.audio import OpenAIWhisperParser
-from base64 import b64encode
 from typing import List, Optional, Tuple
 import config
 import providers
@@ -22,9 +20,9 @@ import usage_log as usage
 import subprocess
 import tempfile
 import re
-
-DEFAULT_SUCCESS_POINTS = 10
-DEFAULT_FAILURE_LIFE_COST = 1
+import sys
+import importlib.util
+from language import contains_japanese
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,113 +31,8 @@ load_dotenv()
 GOOGLE_MODEL = config.GOOGLE_MODEL
 OPENAI_TRANSCRIBE_MODEL = config.OPENAI_TRANSCRIBE_MODEL
 OPENAI_TITLE_MODEL = config.OPENAI_TITLE_MODEL
-
-def _collect_google_api_keys() -> List[str]:
-    keys = []
-    for name in [
-        "GOOGLE_API_KEY",
-        "GOOGLE_API_KEY_1",
-        "GOOGLE_API_KEY_2",
-        "GOOGLE_API_KEY_3",
-    ]:
-        val = os.getenv(name)
-        if val and val not in keys:
-            keys.append(val)
-    return keys
-
-GOOGLE_KEYS = _collect_google_api_keys()
-GOOGLE_LLMS: List[ChatGoogleGenerativeAI] = [
-    ChatGoogleGenerativeAI(model=GOOGLE_MODEL, api_key=k) for k in GOOGLE_KEYS
-]
-
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-def _is_rate_limit_error(e: Exception) -> bool:
-    s = str(e).lower()
-    return (
-        "429" in s
-        or "rate limit" in s
-        or "quota" in s
-        or "exceeded your current quota" in s
-    )
-
-def _should_google_fallback(e: Exception) -> bool:
-    s = str(e).lower()
-    return _is_rate_limit_error(e) or (
-        "no google gemini api keys configured" in s
-        or "unauthorized" in s
-        or "permission" in s
-        or "invalid api key" in s
-        or "not found" in s
-        or "publisher model" in s
-    )
-
-async def _ainvoke_google(messages: List[HumanMessage]) -> Tuple[object, int]:
-    last_err: Optional[Exception] = None
-    for idx, llm in enumerate(GOOGLE_LLMS):
-        try:
-            return await llm.ainvoke(messages), idx
-        except Exception as e:
-            last_err = e
-            if _is_rate_limit_error(e):
-                continue
-            else:
-                # Non-rate-limit error, try next key anyway
-                continue
-    if last_err:
-        raise last_err
-    raise RuntimeError("No Google Gemini API keys configured.")
-
-def _invoke_google(messages: List[HumanMessage]) -> Tuple[object, int]:
-    last_err: Optional[Exception] = None
-    for idx, llm in enumerate(GOOGLE_LLMS):
-        try:
-            return llm.invoke(messages, max_retries=0), idx
-        except Exception as e:
-            last_err = e
-            if _is_rate_limit_error(e):
-                continue
-            else:
-                continue
-    if last_err:
-        raise last_err
-    raise RuntimeError("No Google Gemini API keys configured.")
-
-def _transcribe_with_openai(audio_bytes: bytes, file_ext: str = "wav") -> str:
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OpenAI fallback not configured.")
-    # Use LangChain community OpenAI Whisper parser
-    parser = OpenAIWhisperParser(
-        api_key=OPENAI_API_KEY,
-        model=OPENAI_TRANSCRIBE_MODEL,
-    )
-    # Try direct bytes; if parser requires a file path, fall back to temp file
-    try:
-        result = parser.parse(audio_bytes)  # type: ignore[arg-type]
-    except Exception:
-        tmp_path = os.path.join(VOICE_NOTES_DIR, f"tmp_asr_{uuid.uuid4()}.{file_ext}")
-        with open(tmp_path, "wb") as f:
-            f.write(audio_bytes)
-        try:
-            if hasattr(parser, "parse_file"):
-                result = parser.parse_file(tmp_path)  # type: ignore[attr-defined]
-            else:
-                result = parser.parse(tmp_path)  # type: ignore[arg-type]
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-    # Normalize output across possible return types
-    if isinstance(result, str):
-        return result
-    try:
-        # Document object with page_content
-        return getattr(result, "page_content", "")
-    except Exception:
-        try:
-            # List of Documents
-            return "\n".join(getattr(doc, "page_content", "") for doc in result)
-        except Exception:
-            return str(result)
 
 def _title_with_openai(transcribed_text: str) -> str:
     if not OPENAI_API_KEY:
@@ -211,43 +104,175 @@ def activate_scenario_version(filename: str) -> None:
 # --------- Scenario generation from video/transcript ---------
 
 def _ffmpeg_extract_audio(url: str, out_wav_path: str, sample_rate: int = 16000) -> None:
-    """Use ffmpeg to extract mono WAV audio from a video URL or file path."""
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", url,
-        "-vn",
-        "-ac", "1",
-        "-ar", str(sample_rate),
-        out_wav_path,
+    """Use ffmpeg to extract mono WAV audio from a video URL or file path.
+
+    Strategy:
+    - YouTube: resolve media via yt-dlp and pipe into ffmpeg.
+    - Other URLs: try ffmpeg direct; if it fails and yt-dlp is available, fall back to yt-dlp pipe (supports many sites).
+    """
+    if isinstance(url, str) and _is_youtube_url(url):
+        _ffmpeg_extract_audio_from_youtube(url, out_wav_path, sample_rate=sample_rate)
+        return
+    try:
+        max_seconds = int(getattr(config, "VIDEO_MAX_SECONDS", 300) or 0)
+    except Exception:
+        max_seconds = 300
+    cmd = ["ffmpeg", "-y", "-i", url]
+    if max_seconds > 0:
+        cmd += ["-t", str(max_seconds)]
+    cmd += ["-vn", "-ac", "1", "-ar", str(sample_rate), out_wav_path]
+    try:
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
+        return
+    except subprocess.CalledProcessError as e:
+        url_str = str(url or "")
+        can_try_ytdlp = url_str.startswith("http://") or url_str.startswith("https://")
+        if can_try_ytdlp and importlib.util.find_spec("yt_dlp") is not None:
+            _ffmpeg_extract_audio_from_youtube(url_str, out_wav_path, sample_rate=sample_rate)
+            return
+        snippet = ((e.stderr or b"")[:400]).decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"ffmpeg_failed: {snippet or 'unknown_error'}") from e
+
+
+def _is_youtube_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    u = url.strip().lower()
+    return u.startswith("https://www.youtube.com/") or u.startswith("https://youtube.com/") or u.startswith("https://youtu.be/")
+
+
+def _ffmpeg_extract_audio_from_youtube(url: str, out_wav_path: str, sample_rate: int = 16000) -> None:
+    """Extract audio using yt-dlp piped into ffmpeg.
+
+    Used for YouTube and as a fallback for other sites where ffmpeg cannot ingest the URL directly.
+    """
+    if importlib.util.find_spec("yt_dlp") is None:
+        raise RuntimeError("yt_dlp_not_installed (install with: pip install yt-dlp)")
+
+    # Cap downloads to reduce abuse/cost. yt-dlp expects human-friendly sizes.
+    try:
+        max_bytes = int(getattr(config, "YTDLP_MAX_FILESIZE_BYTES", 52428800) or 0)
+    except Exception:
+        max_bytes = 52428800
+    max_size_arg = None
+    if max_bytes > 0:
+        max_mib = max(1, int(round(max_bytes / (1024 * 1024))))
+        max_size_arg = f"{max_mib}M"
+
+    ytdlp_cmd = [
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "--no-playlist",
+        "--no-progress",
+        *(["--max-filesize", max_size_arg] if max_size_arg else []),
+        "-f",
+        "bestaudio/best",
+        "-o",
+        "-",
+        url,
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    try:
+        max_seconds = int(getattr(config, "VIDEO_MAX_SECONDS", 300) or 0)
+    except Exception:
+        max_seconds = 300
+    ffmpeg_cmd = ["ffmpeg", "-y", "-i", "pipe:0"]
+    if max_seconds > 0:
+        ffmpeg_cmd += ["-t", str(max_seconds)]
+    ffmpeg_cmd += ["-vn", "-ac", "1", "-ar", str(sample_rate), out_wav_path]
+
+    proc = subprocess.Popen(
+        ytdlp_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert proc.stdout is not None
+    try:
+        subprocess.run(
+            ffmpeg_cmd,
+            stdin=proc.stdout,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+        _, ytdlp_err = proc.communicate(timeout=60)
+        if proc.returncode not in (0, None):
+            snippet = (ytdlp_err or b"")[:400].decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"yt_dlp_failed: {snippet or 'unknown_error'}")
 
 
 def _transcribe_audio_bytes(audio_bytes: bytes, lang_hint: str | None = None) -> str:
     """Transcribe bytes via Gemini, with OpenAI fallback, honoring language hints when possible."""
     try:
-        b64 = b64encode(audio_bytes).decode("utf-8")
-        inst = "Transcribe this audio recording."
-        if lang_hint and ("japanese" in lang_hint.lower() or lang_hint.lower() == "ja"):
-            inst = "Transcribe this audio in Japanese script (hiragana/katakana/kanji)."
-        msg = HumanMessage(content=[
-            {"type": "text", "text": inst},
-            {"type": "file", "source_type": "base64", "mime_type": "audio/wav", "data": b64},
-        ])
-        resp, _ = providers.invoke_google([msg])
-        return str(getattr(resp, "content", resp))
-    except Exception:
+        instruction = "Transcribe this audio recording in the language you hear. Do not translate."
+        if lang_hint:
+            hint = lang_hint.strip()
+            lower = hint.lower()
+            if "japanese" in lower or lower == "ja":
+                instruction = (
+                    "Transcribe this audio recording. "
+                    "If the speaker uses Japanese, write it in Japanese script (hiragana/katakana/kanji) without romanizing. "
+                    "If another language is spoken, transcribe using that language's typical writing system. "
+                    "Do not translate."
+                )
+            else:
+                instruction = (
+                    "Transcribe this audio recording. "
+                    f"The expected language is {hint}, but always keep the language that is actually spoken and its writing system. "
+                    "Do not translate."
+                )
+        result = providers.transcribe_audio(
+            audio_bytes,
+            file_ext="wav",
+            mime_type="audio/wav",
+            instructions=instruction,
+            language_hint=lang_hint,
+            context=providers.CONTEXT_NOTES,
+        )
         try:
-            code = None
-            if lang_hint:
-                l = lang_hint.strip().lower()
-                code = "ja" if l in ("japanese", "ja") else l
-            return providers.transcribe_with_openai(audio_bytes, file_ext="wav", language=code)
+            if result.provider == "gemini":
+                key_index = int(result.meta.get("key_index", 0) or 0)
+                usage.log_usage(
+                    event="video_transcribe",
+                    provider="gemini",
+                    model=result.model,
+                    key_label=usage.key_label_from_index(key_index, providers.GOOGLE_KEYS),
+                    status="success",
+                )
+            elif result.provider == "openai":
+                usage.log_usage(
+                    event="video_transcribe",
+                    provider="openai",
+                    model=result.model,
+                    key_label=usage.OPENAI_LABEL,
+                    status="success",
+                )
+            else:
+                usage.log_usage(
+                    event="video_transcribe",
+                    provider=result.provider,
+                    model=result.model,
+                    key_label="unknown",
+                    status="success",
+                )
         except Exception:
-            return ""
+            pass
+        return result.text
+    except Exception:
+        return ""
 
 
-def generate_scenarios_from_transcript(transcript: str, target_language: str = "Japanese", max_scenes: int = 5) -> list:
+def generate_scenarios_from_transcript(
+    transcript: str,
+    target_language: str = "Japanese",
+    max_scenes: int = 5,
+    usage_event: str = "scenario_compile",
+) -> list:
     """Use an LLM to turn a transcript into a short branching scenario list."""
     prompt = (
         "You are a language learning scenario designer. Given this dialogue transcript, "
@@ -258,11 +283,28 @@ def generate_scenarios_from_transcript(transcript: str, target_language: str = "
         "{\n  \"id\": number,\n  \"language\": string,\n  \"description\": string,\n  \"character_dialogue_jp\": string,\n  \"character_dialogue_en\": string,\n  \"options\": [ {\n    \"text\": string, \n    \"next_scenario\": number,\n    \"keywords\": [string...],\n    \"examples\": [ { \"native\": string, \"target\": string, \"pronunciation\": string } ]\n  } ... ]\n}\n\n"
         "Guidelines:\n- IDs must be sequential starting at 1.\n- Use Japanese in character_dialogue_jp when target_language is Japanese; English in character_dialogue_en.\n- Provide 2–3 options in early scenes; terminal scenes can have empty options.\n- Include 1 example per option in the target language.\n- Keywords should include short target-language triggers like はい, いいえ, お願いします.\n\nTranscript:\n" + transcript
     )
+    provider_used = None
+    model_used = None
+    key_index = None
     try:
-        resp, _ = providers.invoke_google([HumanMessage(content=[{"type": "text", "text": prompt}])])
+        resp, key_index = providers.invoke_google([HumanMessage(content=[{"type": "text", "text": prompt}])])
+        provider_used = "gemini"
+        model_used = config.GOOGLE_MODEL
         text = str(getattr(resp, "content", resp))
     except Exception:
+        provider_used = "openai"
+        model_used = config.OPENAI_NARRATIVE_MODEL
         text = providers.openai_chat([HumanMessage(content=prompt)])
+    try:
+        usage.log_usage(
+            event=str(usage_event or "scenario_compile"),
+            provider=str(provider_used or "unknown"),
+            model=str(model_used or "unknown"),
+            key_label=(providers.key_label_from_index(key_index or 0) if provider_used == "gemini" else usage.OPENAI_LABEL),
+            status="success",
+        )
+    except Exception:
+        pass
     # Attempt to extract JSON array
     try:
         import json as _json
@@ -277,6 +319,7 @@ def generate_scenarios_from_transcript(transcript: str, target_language: str = "
     return []
 
 
+
 def generate_scenarios_from_video(url: str, target_language: str = "Japanese", max_scenes: int = 5) -> list:
     """Pipeline: ffmpeg audio extract -> transcribe -> LLM structure -> scenarios list."""
     with tempfile.TemporaryDirectory() as td:
@@ -285,9 +328,31 @@ def generate_scenarios_from_video(url: str, target_language: str = "Japanese", m
         with open(wav_path, "rb") as f:
             audio_bytes = f.read()
     transcript = _transcribe_audio_bytes(audio_bytes, lang_hint=target_language)
-    return generate_scenarios_from_transcript(transcript, target_language=target_language, max_scenes=max_scenes)
+    return generate_scenarios_from_transcript(
+        transcript,
+        target_language=target_language,
+        max_scenes=max_scenes,
+        usage_event="video_compile",
+    )
 
-def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str] = None):
+def _clamp_float(value: object, default: float = 0.0, lo: float = 0.0, hi: float = 1.0) -> float:
+    try:
+        v = float(value)
+    except Exception:
+        v = float(default)
+    if v < lo:
+        return float(lo)
+    if v > hi:
+        return float(hi)
+    return float(v)
+
+
+def process_interaction(
+    audio_file,
+    current_scenario_id_str,
+    lang: Optional[str] = None,
+    judge: Optional[float] = None,
+):
     """
     Processes the user's audio interaction to determine the next scenario.
     """
@@ -303,73 +368,75 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
             f.write(audio_bytes)
 
         # 2. Transcribe Audio to Text with provider rotation & fallback
-        transcribed_text = None
-        try:
-            audio_b64 = b64encode(audio_bytes).decode("utf-8")
-            # Prefer Japanese script when lang indicates Japanese
-            lang_hint = (lang or "").strip().lower()
-            if "japanese" in lang_hint or lang_hint == "ja":
-                instruction = "Transcribe this audio in Japanese script (hiragana/katakana/kanji). Do not romanize."
-            elif lang_hint:
-                instruction = f"Transcribe this audio in {lang} using its native script."
-            else:
-                instruction = "Transcribe this audio recording."
-            message = HumanMessage(
-                content=[
-                    {"type": "text", "text": instruction},
-                    {
-                        "type": "file",
-                        "source_type": "base64",
-                        "mime_type": "audio/webm",
-                        "data": audio_b64,
-                    },
-                ]
+        lang_hint_value = (lang or "").strip().lower()
+        if "japanese" in lang_hint_value or lang_hint_value == "ja":
+            instruction = (
+                "Transcribe this audio recording. "
+                "If the speech is Japanese, write it in Japanese script (hiragana/katakana/kanji) without romanizing. "
+                "If it is another language, transcribe using that language's normal writing system. "
+                "Do not translate."
             )
-            response, key_index = _invoke_google([message])
-            transcribed_text = response.content
-            try:
-                print("[interaction] Heard:", (transcribed_text or "")[:200])
-            except Exception:
-                pass
+        elif lang_hint_value:
+            instruction = (
+                "Transcribe this audio recording. "
+                f"The expected language is {lang}, but always use the language that is actually spoken and its native script. "
+                "Do not translate."
+            )
+        else:
+            instruction = "Transcribe this audio recording in the language you hear. Do not translate."
+
+        transcribe_started = time.perf_counter()
+        result = providers.transcribe_audio(
+            audio_bytes,
+            file_ext="webm",
+            mime_type="audio/webm",
+            instructions=instruction,
+            language_hint=lang_hint_value or None,
+            context=providers.CONTEXT_INTERACTION,
+        )
+        transcribed_text = result.text
+        duration_ms = int((time.perf_counter() - transcribe_started) * 1000)
+        try:
+            print(f"[interaction/{result.provider}] Heard: {(transcribed_text or '')[:200]} (transcription {duration_ms}ms)")
+        except Exception:
+            pass
+        if result.provider == "gemini":
+            key_index = int(result.meta.get("key_index", 0) or 0)
             usage.log_usage(
                 event="interaction_transcribe",
                 provider="gemini",
-                model=GOOGLE_MODEL,
-                key_label=usage.key_label_from_index(key_index, GOOGLE_KEYS),
+                model=result.model,
+                key_label=usage.key_label_from_index(key_index, providers.GOOGLE_KEYS),
                 status="success",
             )
-        except Exception as gerr:
-            if _should_google_fallback(gerr):
-                # Try OpenAI fallback (webm not natively supported by Whisper unless ffmpeg converts,
-                # but often webm/opus works if container is acceptable. If it fails, bubble up.)
-                try:
-                    # Prefer providers implementation so we can pass language hint
-                    lang_code = "ja" if (lang or "").strip().lower() in ("japanese", "ja") else None
-                    transcribed_text = providers.transcribe_with_openai(audio_bytes, file_ext="webm", language=lang_code)
-                except Exception:
-                    # Fall back to legacy helper
-                    transcribed_text = _transcribe_with_openai(audio_bytes, file_ext="webm")
-                try:
-                    print("[interaction/openai] Heard:", (transcribed_text or "")[:200])
-                except Exception:
-                    pass
-                usage.log_usage(
-                    event="interaction_transcribe",
-                    provider="openai",
-                    model=OPENAI_TRANSCRIBE_MODEL,
-                    key_label=usage.OPENAI_LABEL,
-                    status="success",
-                )
-            else:
-                raise gerr
+        elif result.provider == "openai":
+            usage.log_usage(
+                event="interaction_transcribe",
+                provider="openai",
+                model=result.model,
+                key_label=usage.OPENAI_LABEL,
+                status="success",
+            )
+        else:
+            usage.log_usage(
+                event="interaction_transcribe",
+                provider=result.provider,
+                model=result.model,
+                key_label="unknown",
+                status="success",
+            )
 
         heard_raw = transcribed_text or ""
         transcribed_text = (transcribed_text or "").lower()
+        match_confidence = 0.0
+        match_type = "none"
+        best_match_score = 0.0
+        best_match_threshold = None
 
         # 3. Recognize Intent (Simplified MVP Logic)
         current_scenario = get_scenario_by_id(current_scenario_id)
         if not current_scenario:
-            return {"error": "Scenario not found", "heard": heard_raw}
+            return {"error": "Scenario not found", "heard": heard_raw, "confidence": 0.0, "match_type": "missing_scenario"}
 
         # If no lang provided, infer from scenario or presence of JP dialogue
         if not lang:
@@ -385,7 +452,7 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
             current_scenario.get("reward_points")
             or current_scenario.get("points")
             or current_scenario.get("success_points"),
-            DEFAULT_SUCCESS_POINTS,
+            config.DEFAULT_SUCCESS_POINTS,
         )
         penalties_cfg = current_scenario.get("penalties") or {}
         incorrect_cfg = penalties_cfg.get("incorrect_answer") or {}
@@ -394,7 +461,7 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
             or incorrect_cfg.get("life")
             or incorrect_cfg.get("health")
             or incorrect_cfg.get("count"),
-            DEFAULT_FAILURE_LIFE_COST,
+            config.DEFAULT_FAILURE_LIFE_COST,
         )
         language_cfg = penalties_cfg.get("language_mismatch") or {}
         language_failure_lives = _coerce_int(
@@ -402,21 +469,14 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
             or language_cfg.get("life")
             or language_cfg.get("health")
             or language_cfg.get("count"),
-            failure_lives or DEFAULT_FAILURE_LIFE_COST,
+            failure_lives or config.DEFAULT_FAILURE_LIFE_COST,
         )
 
-        success = False
+        # Judge focus slider: 0.0 = learning-first (default, backwards compatible)
+        #                    1.0 = story-first (more permissive; fewer language gates)
+        judge_story_weight = _clamp_float(judge, default=0.0)
 
-        def _contains_japanese(text: str) -> bool:
-            try:
-                for ch in text:
-                    o = ord(ch)
-                    # Hiragana, Katakana, Kanji common blocks
-                    if (0x3040 <= o <= 0x30FF) or (0x31F0 <= o <= 0x31FF) or (0x4E00 <= o <= 0x9FFF):
-                        return True
-            except Exception:
-                pass
-            return False
+        success = False
 
         next_scenario_id = None
 
@@ -428,6 +488,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         next_scenario_id = option.get("next_scenario")
                         if next_scenario_id is not None:
                             success = True
+                            match_confidence = 0.9
+                            match_type = "yes_no_keyword"
                         break
             if not next_scenario_id and any(k in transcribed_text for k in ["no", "not", "nope", "nah"]):
                 for option in current_scenario.get("options", []):
@@ -435,6 +497,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         next_scenario_id = option.get("next_scenario")
                         if next_scenario_id is not None:
                             success = True
+                            match_confidence = 0.9
+                            match_type = "yes_no_keyword"
                         break
 
         # Japanese quick pass: はい/うん → yes, いいえ/いや → no
@@ -446,6 +510,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         next_scenario_id = option.get("next_scenario")
                         if next_scenario_id is not None:
                             success = True
+                            match_confidence = 0.9
+                            match_type = "yes_no_keyword"
                         break
             if not next_scenario_id and any(tok in raw for tok in ["いいえ", "いや", "いえ", "ノー"]):
                 for option in current_scenario.get("options", []):
@@ -453,6 +519,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         next_scenario_id = option.get("next_scenario")
                         if next_scenario_id is not None:
                             success = True
+                            match_confidence = 0.9
+                            match_type = "yes_no_keyword"
                         break
 
         # Japanese polite acceptance (e.g., お願いします/ください) → often implies affirmative
@@ -464,6 +532,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         next_scenario_id = option.get("next_scenario")
                         if next_scenario_id is not None:
                             success = True
+                            match_confidence = 0.85
+                            match_type = "polite_affirmative"
                         break
 
         # Scenario-specific keyword/example matching
@@ -473,6 +543,7 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 best_idx = -1
                 import re
                 raw = heard_raw or ""
+                threshold = 0.6 - (0.12 * judge_story_weight)  # story-first is a bit more permissive
                 for idx, opt in enumerate(current_scenario["options"]):
                     candidates: List[str] = []
                     # free-form keywords list
@@ -499,35 +570,29 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         if score > best_score:
                             best_score = score
                             best_idx = idx
-                if best_idx >= 0 and best_score >= 0.6:
+                best_match_score = float(best_score)
+                best_match_threshold = float(threshold)
+                if best_idx >= 0 and best_score >= threshold:
                     next_scenario = current_scenario["options"][best_idx]
                     next_scenario_id = next_scenario.get("next_scenario")
                     if next_scenario_id is not None:
                         success = True
+                        match_confidence = float(best_score)
+                        match_type = "examples_similarity"
             except Exception:
                 pass
 
         # If target language is Japanese and user spoke non‑Japanese, prompt them to say it in Japanese
-        if (lang or "").lower() in ("japanese", "ja") and heard_raw and not _contains_japanese(heard_raw):
-            try:
-                jp = providers.translate_text(heard_raw, to_language="Japanese", from_language="English")
-            except Exception:
-                jp = ""
-            try:
-                pron = providers.romanize(jp, "Japanese") if jp else ""
-            except Exception:
-                pron = ""
+        if judge_story_weight < 0.66 and (lang or "").lower() in ("japanese", "ja") and heard_raw and not contains_japanese(heard_raw):
             out = {
                 "heard": heard_raw,
                 "npcDoesNotUnderstand": True,
                 "message": "Please say it in Japanese.",
                 "scoreDelta": 0,
                 "livesDelta": -language_failure_lives,
+                "confidence": 0.0,
+                "match_type": "wrong_language",
             }
-            if jp:
-                out["repeatExpected"] = jp
-                if pron:
-                    out["pronunciation"] = pron
             if next_scenario_id:
                 out["repeatNextScenario"] = next_scenario_id
             return out
@@ -555,9 +620,15 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                             line += " (e.g., " + "; ".join(ex_texts[:3]) + ")"
                     lines.append(line)
                 options_block = "\n".join(lines)
+                focus_line = (
+                    "Judging focus: STORY-FIRST (prioritize narrative progression even if the learner uses the wrong language)."
+                    if judge_story_weight >= 0.66
+                    else "Judging focus: LEARNING-FIRST (prefer target-language intent; reject mismatched-language replies when unclear)."
+                )
                 prompt = (
                     "You are choosing the best matching option for a user's spoken reply.\n"
                     "The user reply may be in any language (e.g., Japanese).\n"
+                    f"{focus_line}\n"
                     "Given the scenario context and these options, reply with ONLY the number of the single best option (1-based).\n"
                     "If none fit, reply 0.\n\n"
                     f"Context (may be empty): {current_scenario.get('description') or ''}\n"
@@ -577,6 +648,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                     next_scenario_id = opts[choice - 1].get("next_scenario")
                     if next_scenario_id is not None:
                         success = True
+                        match_confidence = 0.62
+                        match_type = "llm_choice"
             except Exception:
                 try:
                     # Fallback to OpenAI if configured
@@ -589,6 +662,8 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                         next_scenario_id = opts[choice - 1].get("next_scenario")
                         if next_scenario_id is not None:
                             success = True
+                            match_confidence = 0.62
+                            match_type = "llm_choice"
                 except Exception:
                     pass
 
@@ -609,18 +684,20 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                                 expected = (exs[0].get("target") or "").strip() or None
                             elif isinstance(exs[0], str):
                                 expected = exs[0]
-                        if expected:
-                            pron = providers.romanize(expected, "Japanese") or ""
-                            return {
-                                "heard": heard_raw,
-                                "npcDoesNotUnderstand": True,
-                                "message": "Please answer in Japanese.",
-                                "repeatExpected": expected,
-                                "pronunciation": pron,
-                                "repeatNextScenario": yes_opt.get("next_scenario"),
-                                "scoreDelta": 0,
-                                "livesDelta": -language_failure_lives,
-                            }
+                            if expected:
+                                pron = providers.romanize(expected, "Japanese") or ""
+                                return {
+                                    "heard": heard_raw,
+                                    "npcDoesNotUnderstand": True,
+                                    "message": "Please answer in Japanese.",
+                                    "repeatExpected": expected,
+                                    "pronunciation": pron,
+                                    "repeatNextScenario": yes_opt.get("next_scenario"),
+                                    "scoreDelta": 0,
+                                    "livesDelta": -language_failure_lives,
+                                    "confidence": 0.0,
+                                    "match_type": "wrong_language",
+                                }
                 except Exception:
                     pass
             # Return heard text so UI can display it; signal that it didn't match
@@ -629,19 +706,34 @@ def process_interaction(audio_file, current_scenario_id_str, lang: Optional[str]
                 "heard": heard_raw,
                 "scoreDelta": 0,
                 "livesDelta": -failure_lives,
+                "confidence": float(best_match_score or 0.0),
+                "match_type": match_type if match_type != "none" else "no_match",
+                "best_match_score": float(best_match_score or 0.0),
+                "best_match_threshold": float(best_match_threshold) if best_match_threshold is not None else None,
             }
 
         # 4. Determine Next Scenario
         success = True
         next_scenario = get_scenario_by_id(next_scenario_id)
         if not next_scenario:
-            return {"error": "Next scenario not found", "heard": heard_raw, "scoreDelta": 0, "livesDelta": 0}
+            return {
+                "error": "Next scenario not found",
+                "heard": heard_raw,
+                "scoreDelta": 0,
+                "livesDelta": 0,
+                "confidence": float(match_confidence or 0.0),
+                "match_type": match_type,
+            }
         
         return {
             "nextScenario": next_scenario,
             "heard": heard_raw,
             "scoreDelta": reward_points if success else 0,
             "livesDelta": 0,
+            "confidence": float(match_confidence or 0.0),
+            "match_type": match_type,
+            "best_match_score": float(best_match_score or 0.0),
+            "best_match_threshold": float(best_match_threshold) if best_match_threshold is not None else None,
         }
 
     except Exception as e:
@@ -666,69 +758,47 @@ async def transcribe_and_save(wav_path):
 
         # Transcribe with provider rotation & fallback
         print(f"Transcribing {base_filename} from local file bytes...")
-        audio_b64 = b64encode(audio_bytes).decode("utf-8")
-        # Choose mime type based on ext
-        mime = 'audio/wav'
-        if ext in ('webm',):
-            mime = 'audio/webm'
-        elif ext in ('ogg',):
-            mime = 'audio/ogg'
-        elif ext in ('mp3',):
-            mime = 'audio/mp3'
-        elif ext in ('m4a',):
-            mime = 'audio/mp4'
-        transcription_message = HumanMessage(
-            content=[
-                {"type": "text", "text": "Transcribe this audio recording."},
-                {
-                    "type": "file",
-                    "source_type": "base64",
-                    "mime_type": mime,
-                    "data": audio_b64,
-                },
-            ]
+        mime = {
+            "webm": "audio/webm",
+            "ogg": "audio/ogg",
+            "mp3": "audio/mp3",
+            "m4a": "audio/mp4",
+        }.get(ext, "audio/wav")
+        result = await asyncio.to_thread(
+            providers.transcribe_audio,
+            audio_bytes,
+            file_ext=ext,
+            mime_type=mime,
+            instructions="Transcribe this audio recording.",
+            context=providers.CONTEXT_NOTES,
         )
-        try:
-            # Try Gemini quickly (up to 2 attempts across rotated keys), then fallback
-            gemini_ok = False
-            last_key_index = None
-            for attempt in range(2):
-                try:
-                    transcription_response, key_index = await asyncio.to_thread(
-                        providers.invoke_google, [transcription_message]
-                    )
-                    last_key_index = key_index
-                    transcribed_text = transcription_response.content
-                    gemini_ok = True
-                    break
-                except Exception as ge:
-                    print(f"Gemini transcribe attempt {attempt+1} failed for {base_filename}: {ge}")
-                    if providers.should_google_fallback(ge):
-                        break
-                    # non-rate-limit error: try once more, then fallback
-                    continue
-            if gemini_ok:
-                usage.log_usage(
-                    event="transcribe",
-                    provider="gemini",
-                    model=config.GOOGLE_MODEL,
-                    key_label=providers.key_label_from_index(last_key_index or 0),
-                    status="success",
-                )
-            else:
-                raise RuntimeError("Gemini unavailable, falling back")
-        except Exception as e:
-            # Fallback to OpenAI Whisper
-            print(f"Falling back to Whisper for {base_filename}: {e}")
-            transcribed_text = providers.transcribe_with_openai(audio_bytes, file_ext=ext)
+        transcribed_text = result.text
+        print(f"Successfully transcribed {base_filename} via {result.provider}.")
+        if result.provider == "gemini":
+            key_index = int(result.meta.get("key_index", 0) or 0)
+            usage.log_usage(
+                event="transcribe",
+                provider="gemini",
+                model=result.model,
+                key_label=usage.key_label_from_index(key_index, providers.GOOGLE_KEYS),
+                status="success",
+            )
+        elif result.provider == "openai":
             usage.log_usage(
                 event="transcribe",
                 provider="openai",
-                model=config.OPENAI_TRANSCRIBE_MODEL,
+                model=result.model,
                 key_label=usage.OPENAI_LABEL,
                 status="success",
             )
-        print(f"Successfully transcribed {base_filename}.")
+        else:
+            usage.log_usage(
+                event="transcribe",
+                provider=result.provider,
+                model=result.model,
+                key_label="unknown",
+                status="success",
+            )
 
         # Generate title
         print(f"Generating title for {base_filename}...")
@@ -759,7 +829,7 @@ async def transcribe_and_save(wav_path):
                     break
                 except Exception as ge:
                     print(f"Gemini title attempt {attempt+1} failed for {base_filename}: {ge}")
-                    if providers.should_google_fallback(ge):
+                    if providers.is_rate_limit_error(ge):
                         break
                     continue
             if gemini_ok:
@@ -893,31 +963,38 @@ def _similarity(a: str, b: str) -> float:
 def imitate_say(audio_bytes: bytes, mime: str, expected_text: str, target_lang: str | None = None) -> dict:
     """Transcribe the audio and compare to expected_text. Returns {success, score, heard, makesSense}."""
     # Transcribe via Gemini first, fallback OpenAI
-    try:
-        b64 = b64encode(audio_bytes).decode("utf-8")
-        msg = HumanMessage(
-            content=[
-                {"type": "text", "text": "Transcribe this audio recording."},
-                {"type": "file", "source_type": "base64", "mime_type": mime or "audio/webm", "data": b64},
-            ]
-        )
-        resp, key_index = providers.invoke_google([msg])
-        heard = str(getattr(resp, "content", resp))
+    result = providers.transcribe_audio(
+        audio_bytes,
+        file_ext=("webm" if (mime and "webm" in mime) else "wav"),
+        mime_type=mime or "audio/webm",
+        instructions="Transcribe this audio recording.",
+        language_hint=target_lang,
+        context=providers.CONTEXT_IMITATE,
+    )
+    heard = result.text
+    if result.provider == "gemini":
+        key_index = int(result.meta.get("key_index", 0) or 0)
         usage.log_usage(
             event="imitate_transcribe",
             provider="gemini",
-            model=config.GOOGLE_MODEL,
-            key_label=providers.key_label_from_index(key_index or 0),
+            model=result.model,
+            key_label=providers.key_label_from_index(key_index, providers.GOOGLE_KEYS),
             status="success",
         )
-    except Exception as ge:
-        # Fallback to OpenAI Whisper
-        heard = providers.transcribe_with_openai(audio_bytes, file_ext=("webm" if (mime and "webm" in mime) else "wav"))
+    elif result.provider == "openai":
         usage.log_usage(
             event="imitate_transcribe",
             provider="openai",
-            model=config.OPENAI_TRANSCRIBE_MODEL,
+            model=result.model,
             key_label=usage.OPENAI_LABEL,
+            status="success",
+        )
+    else:
+        usage.log_usage(
+            event="imitate_transcribe",
+            provider=result.provider,
+            model=result.model,
+            key_label="unknown",
             status="success",
         )
     score = _similarity(heard or "", expected_text or "")
@@ -931,7 +1008,14 @@ def imitate_say(audio_bytes: bytes, mime: str, expected_text: str, target_lang: 
         print(f"[imitate] Expect='{(expected_text or '')[:60]}' Heard='{(heard or '')[:60]}' score={score:.3f} makes_sense={makes_sense}")
     except Exception:
         pass
-    return {"success": success, "score": round(score, 3), "heard": heard, "makesSense": makes_sense}
+    return {
+        "success": success,
+        "score": round(score, 3),
+        "confidence": round(score, 3),
+        "threshold": 0.72,
+        "heard": heard,
+        "makesSense": makes_sense,
+    }
 
 
 # --------- Scenario Option Suggestions ---------

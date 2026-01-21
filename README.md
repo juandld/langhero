@@ -9,6 +9,7 @@ An interactive learning app (separated from Narrative Hero) that runs branching 
 - Gemini 2.5 Flash primary with OpenAI fallback and key rotation
 - Notes API with tags, filtering fields, and narrative generation (backend)
 - Simple scenario store loaded from JSON (frontend and backend)
+- Time-travel toolkit: freeze time to rehearse safely, burn limited rewinds when the main record goes wrong, and fast-forward past scenarios when caution beats confrontation
 
 ## MVP Scope
 
@@ -21,7 +22,7 @@ Focus for the first playable slice:
 - **Next up (testing)**: add Vitest-based HUD/store tests, Playwright smoke runs, and a provider harness to benchmark streaming latency.
 - Streaming auto-finalizes once the learner’s partial transcript confidently matches a scenario option; manual “stop” remains as a fallback.
 
-Nice-to-haves after the MVP lands: streaming auto-finalize when confidence is high, confidence meter visuals, and Cypress/Playwright end-to-end smoke tests.
+Nice-to-haves after the MVP lands: streaming auto-finalize when confidence is high, confidence meter visuals, and Cypress/Playwright end-to-end smoke tests. Longer-term difficulty knobs include shrinking time-stop windows, translator cooldowns, and timeline debt consequences when the time machine destabilizes.
 
 ## Tech Stack
 
@@ -46,7 +47,7 @@ This is the recommended way to run the project.
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd langhero
+    cd langHero
     ```
 
 2.  **Create a `.env` file (backend):**
@@ -71,6 +72,15 @@ This is the recommended way to run the project.
     # OPENAI_TRANSCRIBE_MODEL="whisper-1"
     # OPENAI_TITLE_MODEL="gpt-4o-mini"
     # OPENAI_NARRATIVE_MODEL="gpt-4o"
+
+    # Optional: transcription provider preferences (comma-separated order)
+    # Values: auto | gemini | openai
+    # TRANSCRIBE_PROVIDER_DEFAULT="auto"
+    # TRANSCRIBE_INTERACTION_PROVIDER="gemini,openai"
+    # TRANSCRIBE_STREAMING_PROVIDER="openai,gemini"
+    # TRANSCRIBE_TRANSLATE_PROVIDER="auto"
+    # TRANSCRIBE_IMITATE_PROVIDER="openai,gemini"
+    # TRANSCRIBE_NOTES_PROVIDER="gemini,openai"
     ```
 
 3.  **Build and run the application with Docker Compose:**
@@ -126,6 +136,7 @@ From project root:
     ```
     The frontend will be available at `http://localhost:5173`.
     Backend URL is configured in `frontend/src/lib/config.ts`.
+    Dev tools dock (usage + cost estimates) is controlled by `frontend/src/lib/devtools.ts`.
 
 ## Testing
 
@@ -209,7 +220,24 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
 
 - High-level product direction lives in `ROADMAP.md`.
 - Detailed design and engineering notes live under `development/`. Start with `development/README.md` for the latest index and action items.
+- Operator workflow + upgrade pack artifacts are archived under `project_updates/` (start at `project_updates/README.md`).
 - When you open a new plan or retire one, cross-link it in the development index so decisions stay connected.
+
+## Standard Operator Workflow
+
+Use this checklist (mirrors `projectUpgrade.md`, with versioned revisions under `project_updates/`) whenever you spin up a new session so every project follows the same on-call workflow:
+
+1. **Log start time** – run `date -u` and record the timestamp in the shared log/task board.
+2. **Capture instant context** – run the repo’s helper (`./operations/scripts/instant_context.py` here) or the closest equivalent and note any sandbox warnings.
+3. **Review source-of-truth docs** – open the active task board (e.g., `development/task_board.md`) and current plans to confirm priorities and timestamps.
+4. **Inspect workspace** – run `git status -sb` before editing; never revert pre-existing changes you didn’t make.
+5. **Prep secrets/env** – copy the documented `.env` template (`cp .env.example .env` or equivalent) and populate required keys.
+6. **Execute the ops workflow** – stage assets, run the canonical prep scripts, launch the main job via scripted entrypoints, and monitor logs with the provided helpers.
+7. **Validate before hand-off** – execute the repo’s test harness (here `tests/test.sh` or the operations test suite) and capture any failures with file/line references.
+8. **Update shared artifacts** – log what you ran, data snapshots, and follow-ups in `development/task_board.md`, `development/current_plans.md`, or the project tracker.
+9. **Leave breadcrumbs** – summarize outstanding risks/TODOs in your chat response and point to relevant paths or commands instead of pasting large files.
+10. **Standardize other repos** – if another project lacks these tools, stub minimal versions (task board, current plan, instant context script, ops folder) so the workflow stays consistent.
+11. **Head back to the task board** – once the checklist is complete, immediately consult `development/task_board.md` to pick up the current priorities and log any new context.
 
 ### Planning Docs
 
@@ -224,7 +252,7 @@ On startup, any legacy `.txt`/`.title` are consolidated into JSON. Missing metad
 - **M1 Mock Streaming Loop** (done) FastAPI WebSocket echo path with mocked transcript; dev-only UI flag to preview.
 - **M2 Provider Shoot-out Harness** (planned) Stand up adapters and latency benchmarks for Gemini/OpenAI/Whisper and log results to `development/notes/provider-benchmarks.md` once that scratchpad file exists.
 - **M3 Streaming Transcript Prototype** (done) Replace mocks with real streaming provider and surface live transcript in the HUD.
-- **M4 Scenario Mode Toggle** (up next) Extend scenario JSON with `mode`, propagate through backend responses, and swap frontend controls based on mode.
+- **M4 Scenario Mode Toggle** (in progress) Scenario JSON now carries `mode`/penalties, streaming events surface the same metadata, and the Svelte HUD swaps between time-stop and live streaming states automatically.
 - **M5 Confidence & Lives Feedback** (up next) Deliver confidence meter, lives UI, and logging for retries/success.
 - **M6 Production Hardening** (up next) Add reconnection logic, rate limiting, health checks, and document deployment checklists.
 
@@ -258,6 +286,34 @@ Notes:
 - FFmpeg is installed in the backend image. For YouTube or streaming sites, consider adding `yt-dlp` and piping bestaudio to FFmpeg in a future enhancement.
 - Generated scenarios are activated by default; use `/api/scenarios` to inspect the active list or `/api/scenarios/import` to replace manually.
 - Notes UI components (e.g., `NotesList.svelte`, `FiltersBar.svelte`, `BulkActions.svelte`, `NarrativesDrawer.svelte`) are present but not currently wired into a route. The backend APIs are ready when you choose to surface them.
+
+## Generate Scenario Voice Clips
+
+Use the OpenAI TTS helper to pre-render spoken lines for each scenario option example. The script caches synthesized phrases in `examples_audio/manifest.json`, assigns each canonical clip a stable `clip_id`, and records per-scenario mappings in `examples_audio/scenario_clips.json`. By default it does **not** duplicate audio per scenario—every example just references the canonical asset.
+
+```bash
+export OPENAI_API_KEY="sk-your-key"  # or add it to backend/.env
+python operations/scripts/generate_voices.py \
+  --scenario-file backend/scenarios.json \
+  --voice alloy \
+  --format mp3 \
+  --expand-variants \
+  --max-variants 4 \
+  --link-index examples_audio/scenario_clips.json
+```
+
+Flags:
+
+- `--dry-run` prints what would be generated without touching disk or OpenAI.
+- `--overwrite` regenerates scenario-specific files even if they already exist.
+- `--scenario-file` lets you point at an alternate scenario JSON (e.g., fixtures).
+- `--output-dir` chooses another cache location; manifest defaults to `<output-dir>/manifest.json`.
+- `--expand-variants/--max-variants` opt into up to N alternates per phrase; leave the flag off to reuse a single canonical clip.
+- `--link-index` controls where per-scenario → clip mappings are written (default `examples_audio/scenario_clips.json`).
+- `--write-copies` re-enables the legacy behavior of writing `scenario-*.mp3` files alongside the canonical clips.
+
+All files land under `examples_audio/`, with canonical phrase clips living in `phrases/` and link metadata stored in `scenario_clips.json`. (Use `--write-copies` only if you still need the older `scenario-<id>-opt<idx>-ex<idx>.mp3` assets.) See `development/voice-generation.md` for caching/variation guidelines and reasoning tests, and `tests/voice_generation_test.py` for the accompanying pytest coverage.
+
 
 ## Tips
 

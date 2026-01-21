@@ -8,7 +8,7 @@ def test_streaming_interaction_flow(app_client, monkeypatch):
         await asyncio.sleep(0)
         return "hello world"
 
-    def _fake_process(_audio_file, _scenario_id, _lang):
+    def _fake_process(_audio_file, _scenario_id, _lang, judge=None):
         return {"heard": "final heard", "nextScenario": 5}
 
     monkeypatch.setattr(streaming, "transcribe_audio", _fake_transcribe, raising=False)
@@ -30,7 +30,7 @@ def test_streaming_interaction_flow(app_client, monkeypatch):
         penalty = ws.receive_json()
         assert penalty["event"] == "penalty"
         assert penalty["detected_language"] == "english"
-        assert penalty["lives_remaining"] == 2
+        assert penalty["lives_remaining"] == 1
         assert penalty["score"] == 0
         assert isinstance(penalty["message"], str) and penalty["message"]
 
@@ -39,4 +39,4 @@ def test_streaming_interaction_flow(app_client, monkeypatch):
         assert final["event"] == "final"
         assert final["result"]["nextScenario"] == 5
         assert final["score"] >= 0
-        assert final["lives_remaining"] == 2
+        assert final["lives_remaining"] == 1

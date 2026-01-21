@@ -1,0 +1,282 @@
+{
+  "version": 1,
+  "created_at_ms": 1767406890797,
+  "key": {
+    "source_id": "youtube:ZtyyJFwp4GA",
+    "target_language": "Japanese",
+    "max_scenes": 6,
+    "version": 1
+  },
+  "scenarios": [
+    {
+      "id": 1,
+      "language": "Japanese",
+      "description": "Elmo is curious about bus drivers and wants to learn!",
+      "character_dialogue_jp": "エルモはバスのうんてんしについて、もっとしりたいな！",
+      "character_dialogue_en": "Elmo wants to learn more about bus drivers!",
+      "options": [
+        {
+          "text": "Yes, let's learn!",
+          "next_scenario": 2,
+          "keywords": [
+            "はい",
+            "まなぶ"
+          ],
+          "examples": [
+            {
+              "native": "はい、まなびましょう！",
+              "target": "はい、学びましょう！",
+              "pronunciation": "Hai, manabimashou!"
+            }
+          ]
+        },
+        {
+          "text": "No, I want to play!",
+          "next_scenario": 6,
+          "keywords": [
+            "いいえ",
+            "あそぶ"
+          ],
+          "examples": [
+            {
+              "native": "いいえ、あそびたい！",
+              "target": "いいえ、遊びたい！",
+              "pronunciation": "Iie, asobitai!"
+            }
+          ]
+        }
+      ],
+      "mode": "beginner",
+      "lives": 3,
+      "reward_points": 10,
+      "penalties": {
+        "incorrect_answer": {
+          "lives": 1
+        },
+        "language_mismatch": {
+          "lives": 1
+        }
+      }
+    },
+    {
+      "id": 2,
+      "language": "Japanese",
+      "description": "Elmo asks his friend Smarty, who is a bus driver, about her job.",
+      "character_dialogue_jp": "こんにちは、スマーティ！バスのうんてんしってどんなおしごと？",
+      "character_dialog_en": "Hi, Smarty! What kind of job is a bus driver?",
+      "options": [
+        {
+          "text": "Tell me more!",
+          "next_scenario": 3,
+          "keywords": [
+            "もっと",
+            "おしえて"
+          ],
+          "examples": [
+            {
+              "native": "もっとおしえて！",
+              "target": "もっと教えて！",
+              "pronunciation": "Motto oshiete!"
+            }
+          ]
+        },
+        {
+          "text": "Can I drive a bus?",
+          "next_scenario": 4,
+          "keywords": [
+            "うんてん",
+            "できる"
+          ],
+          "examples": [
+            {
+              "native": "うんてんできる？",
+              "target": "運転できる？",
+              "pronunciation": "Unten dekiru?"
+            }
+          ]
+        }
+      ],
+      "mode": "advanced",
+      "lives": 2,
+      "reward_points": 15,
+      "penalties": {
+        "incorrect_answer": {
+          "lives": 1
+        },
+        "language_mismatch": {
+          "lives": 1
+        }
+      }
+    },
+    {
+      "id": 3,
+      "language": "Japanese",
+      "description": "Smarty explains that bus drivers pick up passengers at bus stops.",
+      "character_dialogue_jp": "バスうんてんしは、バスていでとまって、みんなをのせるのよ！",
+      "character_dialog_en": "Bus drivers stop at bus stops and pick up everyone!",
+      "options": [
+        {
+          "text": "I understand!",
+          "next_scenario": 5,
+          "keywords": [
+            "わかる",
+            "はい"
+          ],
+          "examples": [
+            {
+              "native": "はい、わかった！",
+              "target": "はい、分かった！",
+              "pronunciation": "Hai, wakatta!"
+            }
+          ]
+        },
+        {
+          "text": "Let's go to a bus stop!",
+          "next_scenario": 4,
+          "keywords": [
+            "いく",
+            "バスてい"
+          ],
+          "examples": [
+            {
+              "native": "バスていへいこう！",
+              "target": "バス停へ行こう！",
+              "pronunciation": "Basu tei e ikou!"
+            }
+          ]
+        }
+      ],
+      "mode": "beginner",
+      "lives": 3,
+      "reward_points": 10,
+      "penalties": {
+        "incorrect_answer": {
+          "lives": 1
+        },
+        "language_mismatch": {
+          "lives": 1
+        }
+      }
+    },
+    {
+      "id": 4,
+      "language": "Japanese",
+      "description": "Elmo is playing a bus driving game. The traffic light turns green!",
+      "character_dialogue_jp": "みて！あおしんごうだよ！すすむ？",
+      "character_dialog_en": "Look! It's a green light! Should we go?",
+      "options": [
+        {
+          "text": "Yes, let's go!",
+          "next_scenario": 5,
+          "keywords": [
+            "はい",
+            "すすむ",
+            "いく"
+          ],
+          "examples": [
+            {
+              "native": "はい、すすもう！",
+              "target": "はい、進もう！",
+              "pronunciation": "Hai, susumou!"
+            }
+          ]
+        },
+        {
+          "text": "No, stop!",
+          "next_scenario": 6,
+          "keywords": [
+            "いいえ",
+            "とまる"
+          ],
+          "examples": [
+            {
+              "native": "いいえ、とまる！",
+              "target": "いいえ、止まる！",
+              "pronunciation": "Iie, tomaru!"
+            }
+          ]
+        }
+      ],
+      "mode": "beginner",
+      "lives": 3,
+      "reward_points": 10,
+      "penalties": {
+        "incorrect_answer": {
+          "lives": 1
+        },
+        "language_mismatch": {
+          "lives": 1
+        }
+      }
+    },
+    {
+      "id": 5,
+      "language": "Japanese",
+      "description": "Miss Noodle is trying to drive the bus, but she's outside! Elmo helps her.",
+      "character_dialogue_jp": "ミス・ヌードル、うんてんしたいの？バスのなかにのって！",
+      "character_dialog_en": "Miss Noodle, do you want to drive? Get inside the bus!",
+      "options": [
+        {
+          "text": "Get inside!",
+          "next_scenario": 6,
+          "keywords": [
+            "なか",
+            "のる"
+          ],
+          "examples": [
+            {
+              "native": "なかにのって！",
+              "target": "中に乗って！",
+              "pronunciation": "Naka ni notte!"
+            }
+          ]
+        },
+        {
+          "text": "Drive the bus!",
+          "next_scenario": 6,
+          "keywords": [
+            "うんてん",
+            "する"
+          ],
+          "examples": [
+            {
+              "native": "うんてんして！",
+              "target": "運転して！",
+              "pronunciation": "Unten shite!"
+            }
+          ]
+        }
+      ],
+      "mode": "beginner",
+      "lives": 3,
+      "reward_points": 10,
+      "penalties": {
+        "incorrect_answer": {
+          "lives": 1
+        },
+        "language_mismatch": {
+          "lives": 1
+        }
+      }
+    },
+    {
+      "id": 6,
+      "language": "Japanese",
+      "description": "Elmo is happy to learn new things and does a happy dance! You did a great job!",
+      "character_dialogue_jp": "いろいろまなんで、エルモはうれしいな！ハッピーダンス！",
+      "character_dialog_en": "Elmo is happy to learn many things! Happy dance!",
+      "options": [],
+      "mode": "beginner",
+      "lives": 3,
+      "reward_points": 10,
+      "penalties": {
+        "incorrect_answer": {
+          "lives": 1
+        },
+        "language_mismatch": {
+          "lives": 1
+        }
+      }
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import io
 import pytest
 
 from backend import services
+from tests.fixtures import scenarios as scenario_fixtures
 
 
 @pytest.fixture
@@ -25,15 +26,15 @@ def interaction_env(tmp_path, monkeypatch):
 
     stub = Stub()
 
-    def fake_invoke_google(messages):
-        return type("Resp", (), {"content": stub.transcript})(), 0
-
-    monkeypatch.setattr(services, "_invoke_google", fake_invoke_google)
-    monkeypatch.setattr(services.providers, "transcribe_with_openai", lambda *args, **kwargs: stub.transcript)
     monkeypatch.setattr(
         services.providers,
-        "invoke_google",
-        lambda *args, **kwargs: (type("Resp", (), {"content": "0"})(), 0),
+        "transcribe_audio",
+        lambda *args, **kwargs: services.providers.TranscriptionResult(
+            text=stub.transcript,
+            provider="openai",
+            model="stub-model",
+        ),
+        raising=False,
     )
     monkeypatch.setattr(services.providers, "openai_chat", lambda *args, **kwargs: "0")
 
@@ -56,12 +57,11 @@ def test_process_interaction_awards_reward(interaction_env):
     scenarios.clear()
     scenarios.update(
         {
-            1: {
-                "id": 1,
-                "language": "Japanese",
-                "reward_points": 15,
-                "penalties": {"incorrect_answer": {"lives": 2}},
-                "options": [
+            1: scenario_fixtures.beginner_scenario(
+                id=1,
+                reward_points=15,
+                penalties={"incorrect_answer": {"lives": 2}},
+                options=[
                     {
                         "text": "Yes",
                         "next_scenario": 2,
@@ -73,9 +73,9 @@ def test_process_interaction_awards_reward(interaction_env):
                         "examples": [{"target": "いいえ、結構です。"}],
                     },
                 ],
-            },
-            2: {"id": 2},
-            3: {"id": 3},
+            ),
+            2: scenario_fixtures.advanced_scenario(id=2, options=[]),
+            3: scenario_fixtures.advanced_scenario(id=3, options=[]),
         }
     )
     stub.transcript = "はい、お願いします。"
@@ -93,20 +93,19 @@ def test_process_interaction_penalizes_incorrect_answer(interaction_env):
     scenarios.clear()
     scenarios.update(
         {
-            1: {
-                "id": 1,
-                "language": "Japanese",
-                "reward_points": 10,
-                "penalties": {"incorrect_answer": {"lives": 2}},
-                "options": [
+            1: scenario_fixtures.beginner_scenario(
+                id=1,
+                reward_points=10,
+                penalties={"incorrect_answer": {"lives": 2}},
+                options=[
                     {
                         "text": "Yes",
                         "next_scenario": 2,
                         "examples": [{"target": "はい、お願いします。"}],
                     }
                 ],
-            },
-            2: {"id": 2},
+            ),
+            2: scenario_fixtures.advanced_scenario(id=2, options=[]),
         }
     )
     stub.transcript = "ちがいます"
@@ -123,23 +122,22 @@ def test_process_interaction_penalizes_wrong_language(interaction_env):
     scenarios.clear()
     scenarios.update(
         {
-            1: {
-                "id": 1,
-                "language": "Japanese",
-                "reward_points": 10,
-                "penalties": {
+            1: scenario_fixtures.beginner_scenario(
+                id=1,
+                reward_points=10,
+                penalties={
                     "incorrect_answer": {"lives": 1},
                     "language_mismatch": {"lives": 3, "points": 12},
                 },
-                "options": [
+                options=[
                     {
                         "text": "Yes",
                         "next_scenario": 2,
                         "examples": [{"target": "はい、お願いします。"}],
                     }
                 ],
-            },
-            2: {"id": 2},
+            ),
+            2: scenario_fixtures.advanced_scenario(id=2, options=[]),
         }
     )
     stub.transcript = "yes please"
@@ -147,6 +145,38 @@ def test_process_interaction_penalizes_wrong_language(interaction_env):
     result = services.process_interaction(make_audio(), "1", "Japanese")
 
     assert result["npcDoesNotUnderstand"] is True
-    assert result["repeatExpected"] == "はい、お願いします。"
+    assert "repeatExpected" not in result
     assert result["livesDelta"] == -3
     assert result["scoreDelta"] == 0
+
+
+def test_process_interaction_story_first_allows_wrong_language(interaction_env):
+    stub, scenarios = interaction_env
+    scenarios.clear()
+    scenarios.update(
+        {
+            1: scenario_fixtures.beginner_scenario(
+                id=1,
+                reward_points=10,
+                penalties={
+                    "incorrect_answer": {"lives": 1},
+                    "language_mismatch": {"lives": 3, "points": 12},
+                },
+                options=[
+                    {
+                        "text": "Yes",
+                        "next_scenario": 2,
+                        "examples": [{"target": "はい、お願いします。"}],
+                    }
+                ],
+            ),
+            2: scenario_fixtures.advanced_scenario(id=2, options=[]),
+        }
+    )
+    stub.transcript = "yes please"
+
+    result = services.process_interaction(make_audio(), "1", "Japanese", judge=1.0)
+
+    assert result["nextScenario"]["id"] == 2
+    assert result["scoreDelta"] == 10
+    assert result["livesDelta"] == 0

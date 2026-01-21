@@ -26,6 +26,8 @@
               <span>{evt.transcript}</span>
             {:else if evt.message}
               <span>{evt.message}</span>
+            {:else if evt.error}
+              <span class="error">error: {evt.error}</span>
             {:else if evt.preview}
               <span>bytes: {evt.bytes} • preview: {evt.preview}</span>
             {/if}
@@ -96,5 +98,10 @@
   .mock-stream-events .placeholder {
     color: #6b7280;
     font-style: italic;
+  }
+
+  .error {
+    color: #b91c1c;
+    font-weight: 650;
   }
 </style>

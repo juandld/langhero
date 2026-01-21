@@ -25,22 +25,39 @@ Concrete checkpoints that unlock quick feedback and let us iterate safely. Each 
 
 ## M4. Scenario Mode Toggle
 
-- [ ] Extend scenario JSON with `mode` field and per-mode defaults (`reward_points`, `penalties`).
-- [ ] Update backend responses to surface `mode`, reward, and penalty metadata.
-- [ ] Teach `storyStore` to expose `mode`, default lives, and reward values.
-- [ ] Provide storybook/demo scenario to exercise both paths.
+- [x] Extend scenario JSON with `mode` field and per-mode defaults (`reward_points`, `penalties`).
+- [x] Update backend responses to surface `mode`, reward, and penalty metadata.
+- [x] Teach `storyStore` to expose `mode`, default lives, and reward values.
+- [x] Provide storybook/demo scenario to exercise both paths (`/demo` route).
 - **Test:** Unit tests for `storyStore` mode handling; Cypress (or Playwright) smoke test hitting both modes with stubbed backend.
 
-## M5. Confidence & Lives Feedback
+## M5. High-Stakes Response Loop
+
+- Distinguish main record vs. translator/rehearsal controls in the UI (copy, color, affordances).
+- Backend enforces that only `/narrative/interaction` consumes lives; translation endpoints never emit penalties.
+- Add HUD messaging that frames lives as limited “time skips” and present warnings before submission.
+- Introduce fast-forward (time skip forward) control that lets players bail out with documented reward/branch trade-offs.
+- Telemetry: log when players use prep tools versus taking high-stakes actions.
+- **Test:** Vitest scenario for `ScenarioDisplay` ensuring translator flows do not decrement lives and fast-forward leaves lives untouched; pytest case confirming wrong-language submissions still burn lives but no translation/fast-forward call does.
+
+## M6. Confidence & Lives Feedback
 
 - Backend sends confidence scores with each update; define thresholds per mode.
 - Frontend displays confidence meter and decrements lives on low-confidence outcomes.
 - Log events for telemetry (success, retries, disconnects).
 - **Test:** Vitest/Svelte component tests for `ScenarioStatus` (score/lives banner) and `ScenarioDisplay` penalty handling; integration test simulating low/high confidence and wrong-language responses.
 
-## M6. Production Hardening
+## M7. Production Hardening
 
 - Add reconnection logic, buffering, and error states to streaming client.
 - Implement server-side rate limiting/logging + health checks.
 - Document deployment checklist in `development/README.md`.
 - **Test:** Automated chaos test (network toggle) ensuring client recovers; backend load test with concurrent sessions.
+
+## M8. Temporal Destabilization Systems
+
+- Implement shrinking time-stop window tied to instability meter; expose meter in HUD.
+- Add translator cooldown/charge mechanic with clear UI feedback and backend enforcement.
+- Track timeline debt from fast-forward or repeated rewinds and adjust rewards/branch availability.
+- Narrative/UI copy communicates destabilization states (tooltips, alerts, audio cues).
+- **Test:** Vitest coverage for HUD meter & cooldown; pytest ensuring backend meters persist across turns and only trigger expected penalties; integration scenario verifying reward reductions when timeline debt is high.

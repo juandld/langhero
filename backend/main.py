@@ -14,7 +14,11 @@ for logger_name in loggers_to_silence:
 
 import json
 
-from fastapi import FastAPI, File, UploadFile, Form, Response, Request, BackgroundTasks, WebSocket, WebSocketDisconnect
+from typing import Optional
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, File, UploadFile, Form, Response, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from services import (
@@ -30,7 +34,8 @@ from services import (
     imitate_say,
     generate_scenarios_from_video,
 )
-from models import TagsUpdate
+from models import TagsUpdate, StoryImportRequest, AutoImportRequest
+from story_import import build_imported_scenarios
 from utils import on_startup
 import uvicorn
 import socket
@@ -41,27 +46,111 @@ import asyncio
 from langchain_core.messages import HumanMessage
 import providers
 import config
+import voice_cache
+import published_runs
 from mock_stream import build_session, MockStreamingSession
 from streaming import create_session, StreamingSession
+from scenario_normalize import normalize_scenarios
+import import_cache
+import usage_log as usage
+import url_fetch
+import urllib.parse
+import time
 
-app = FastAPI()
 
-# Configure CORS to allow requests from the SvelteKit frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\\d+)?$",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await on_startup()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+# ----------------- Security helpers -----------------
+
+_RATE_STATE: dict[str, dict[str, tuple[int, int]]] = {}
+
+
+def _client_ip_from_headers(headers: dict) -> str:
+    try:
+        xff = headers.get("x-forwarded-for") or headers.get("X-Forwarded-For") or ""
+        if isinstance(xff, str) and xff.strip():
+            return xff.split(",")[0].strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _rate_limit(bucket: str, ip: str, limit_per_min: int) -> None:
+    if not config.RATE_LIMIT_ENABLED:
+        return
+    try:
+        limit = int(limit_per_min)
+    except Exception:
+        limit = 0
+    if limit <= 0:
+        return
+    now_bucket = int(time.time() // 60)
+    bucket_map = _RATE_STATE.setdefault(bucket, {})
+    prev = bucket_map.get(ip)
+    if not prev or prev[0] != now_bucket:
+        bucket_map[ip] = (now_bucket, 1)
+        return
+    count = int(prev[1]) + 1
+    bucket_map[ip] = (now_bucket, count)
+    if count > limit:
+        raise HTTPException(status_code=429, detail="rate_limited")
+
+
+def _is_admin(headers: dict) -> bool:
+    key = (config.ADMIN_API_KEY or "").strip()
+    if not key:
+        return False
+    # Accept either X-Admin-Key or Authorization: Bearer <key>
+    try:
+        supplied = headers.get("x-admin-key") or headers.get("X-Admin-Key") or ""
+        if isinstance(supplied, str) and supplied.strip() == key:
+            return True
+    except Exception:
+        pass
+    try:
+        auth = headers.get("authorization") or headers.get("Authorization") or ""
+        if isinstance(auth, str) and auth.lower().startswith("bearer "):
+            token = auth.split(None, 1)[1].strip()
+            if token == key:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _require_admin(headers: dict, *, flag: bool) -> None:
+    if not flag:
+        return
+    if not (config.ADMIN_API_KEY or "").strip():
+        raise HTTPException(status_code=500, detail="admin_key_not_configured")
+    if not _is_admin(headers):
+        raise HTTPException(status_code=401, detail="admin_required")
+
+# Configure CORS to allow requests from the SvelteKit frontend.
+# Prefer env-configured origins/regex from config; otherwise fall back to localhost defaults.
+cors_kwargs = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+
+allowed_regex = getattr(config, "ALLOWED_ORIGIN_REGEX", None)
+if allowed_regex:
+    cors_kwargs["allow_origin_regex"] = allowed_regex
+else:
+    origins = getattr(config, "ALLOWED_ORIGINS", None)
+    if origins:
+        cors_kwargs["allow_origins"] = origins
+    else:
+        cors_kwargs["allow_origin_regex"] = r"^http://(localhost|127\\.0\\.0\\.1)(:\\d+)?$"
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # Mount static files directory for voice notes
 VOICE_NOTES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'voice_notes'))
@@ -74,6 +163,33 @@ os.makedirs(EXAMPLES_DIR, exist_ok=True)
 app.mount("/voice_notes", StaticFiles(directory=VOICE_NOTES_DIR), name="voice_notes")
 app.mount("/examples", StaticFiles(directory=EXAMPLES_DIR), name="examples")
 
+@app.get("/api/meta")
+async def api_meta():
+    """Lightweight runtime flags for the frontend (dev/demo UX)."""
+    return {
+        "demo_mode": bool(config.DEMO_MODE),
+        "demo_video_cache_only": bool(config.DEMO_VIDEO_CACHE_ONLY),
+        "demo_allow_llm_import": bool(config.DEMO_ALLOW_LLM_IMPORT),
+        "demo_disable_streaming": bool(config.DEMO_DISABLE_STREAMING),
+        "utc_now": datetime.utcnow().isoformat(),
+    }
+
+
+@app.get("/api/usage/weekly")
+async def api_usage_weekly(year: Optional[int] = None, week: Optional[int] = None):
+    """Weekly rollup of usage events (for dev tools / cost estimation)."""
+    return usage.load_weekly_summary(year=year, iso_week=week)
+
+
+@app.get("/api/usage/recent")
+async def api_usage_recent(limit: int = 200, days: int = 7):
+    """Recent raw usage events (newest-first) from daily JSONL logs."""
+    return {
+        "limit": max(1, min(int(limit or 200), 2000)),
+        "days": max(1, min(int(days or 7), 60)),
+        "events": usage.load_recent_events(limit=limit, days=days),
+    }
+
 
 @app.websocket("/stream/mock")
 async def mock_stream_endpoint(websocket: WebSocket):
@@ -81,7 +197,7 @@ async def mock_stream_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     session: MockStreamingSession = build_session({})
-    pending_chunk: bytes | None = None
+    pending_chunk: Optional[bytes] = None
     reason = "client_stop"
 
     try:
@@ -148,9 +264,43 @@ async def mock_stream_endpoint(websocket: WebSocket):
 @app.websocket("/stream/interaction")
 async def interaction_stream_endpoint(websocket: WebSocket):
     """Real streaming endpoint: emits partial transcripts, penalties, and final results."""
+    if config.DEMO_MODE and config.DEMO_DISABLE_STREAMING:
+        await websocket.accept()
+        await websocket.send_json({"event": "error", "error": "demo_mode_streaming_disabled"})
+        await websocket.close()
+        return
+    headers = {k.lower(): v for (k, v) in websocket.headers.items()}
+    if bool(config.REQUIRE_ADMIN_FOR_STREAM):
+        if not (config.ADMIN_API_KEY or "").strip():
+            await websocket.accept()
+            await websocket.send_json({"event": "error", "error": "admin_key_not_configured"})
+            await websocket.close()
+            return
+        if not _is_admin(headers):
+            await websocket.accept()
+            await websocket.send_json({"event": "error", "error": "admin_required"})
+            await websocket.close()
+            return
+    try:
+        ip = (websocket.client.host if websocket.client else None) or _client_ip_from_headers(headers)
+        _rate_limit("stream_connect", str(ip), int(getattr(config, "RATE_LIMIT_STREAM_CONN_PER_MIN", 30)))
+    except HTTPException as he:
+        await websocket.accept()
+        await websocket.send_json({"event": "error", "error": str(getattr(he, "detail", "rate_limited"))})
+        await websocket.close()
+        return
     await websocket.accept()
     session: StreamingSession = create_session({})
-    pending_chunk: bytes | None = None
+    pending_chunk: Optional[bytes] = None
+    total_bytes = 0
+    try:
+        max_chunk_bytes = int(config.STREAM_MAX_CHUNK_BYTES or 0)
+    except Exception:
+        max_chunk_bytes = 0
+    try:
+        max_session_bytes = int(config.STREAM_MAX_SESSION_BYTES or 0)
+    except Exception:
+        max_session_bytes = 0
 
     try:
         first_message = await websocket.receive()
@@ -179,13 +329,26 @@ async def interaction_stream_endpoint(websocket: WebSocket):
             "event": "ready",
             "scenario_id": session.scenario_id,
             "target_language": session.target_language,
+            "mode": session.mode,
             "lives_total": session.lives_total,
             "lives_remaining": session.lives_remaining,
             "score": session.score,
+            "reward_points": session.points_per_success,
+            "language_penalty_lives": session.language_penalty_lives,
+            "incorrect_penalty_lives": session.incorrect_penalty_lives,
         }
     )
 
     if pending_chunk:
+        if max_chunk_bytes > 0 and len(pending_chunk) > max_chunk_bytes:
+            await websocket.send_json({"event": "error", "error": "stream_chunk_too_large"})
+            await websocket.close()
+            return
+        total_bytes += len(pending_chunk)
+        if max_session_bytes > 0 and total_bytes > max_session_bytes:
+            await websocket.send_json({"event": "error", "error": "stream_session_bytes_exceeded"})
+            await websocket.close()
+            return
         await session.append_chunk(pending_chunk, websocket)
 
     try:
@@ -195,6 +358,13 @@ async def interaction_stream_endpoint(websocket: WebSocket):
             if msg_type == "websocket.receive":
                 if message.get("bytes") is not None:
                     chunk = message.get("bytes") or b""
+                    if max_chunk_bytes > 0 and len(chunk) > max_chunk_bytes:
+                        await websocket.send_json({"event": "error", "error": "stream_chunk_too_large"})
+                        break
+                    total_bytes += len(chunk)
+                    if max_session_bytes > 0 and total_bytes > max_session_bytes:
+                        await websocket.send_json({"event": "error", "error": "stream_session_bytes_exceeded"})
+                        break
                     await session.append_chunk(chunk, websocket)
                 elif message.get("text") is not None:
                     text = (message.get("text") or "").strip().lower()
@@ -202,15 +372,26 @@ async def interaction_stream_endpoint(websocket: WebSocket):
                         await session.finalize(websocket)
                         break
                     elif text in {"reset"}:
-                        session = create_session({})
+                        session = create_session(
+                            {
+                                "scenario_id": session.scenario_id,
+                                "language": session.target_language,
+                                "learner_language": session.learner_language,
+                                "judge": getattr(session, "judge_story_weight", 0.0),
+                            }
+                        )
                         await websocket.send_json(
                             {
                                 "event": "reset",
                                 "scenario_id": session.scenario_id,
                                 "target_language": session.target_language,
+                                "mode": session.mode,
                                 "lives_total": session.lives_total,
                                 "lives_remaining": session.lives_remaining,
                                 "score": session.score,
+                                "reward_points": session.points_per_success,
+                                "language_penalty_lives": session.language_penalty_lives,
+                                "incorrect_penalty_lives": session.incorrect_penalty_lives,
                             }
                         )
                     else:
@@ -222,21 +403,24 @@ async def interaction_stream_endpoint(websocket: WebSocket):
     finally:
         await websocket.close()
 
-@app.on_event("startup")
-async def startup_event():
-    await on_startup()
-
 @app.post("/narrative/interaction")
 async def handle_interaction(
     audio_file: UploadFile = File(...), 
     current_scenario_id: str = Form(...),
     lang: str = Form(None),
+    judge: str = Form(None),
 ):
     """
     This endpoint receives audio and the current scenario ID,
     processes them, and returns the next scenario.
     """
-    result = process_interaction(audio_file.file, current_scenario_id, lang)
+    judge_value = None
+    try:
+        if judge is not None and str(judge).strip() != "":
+            judge_value = float(judge)
+    except Exception:
+        judge_value = None
+    result = process_interaction(audio_file.file, current_scenario_id, lang, judge=judge_value)
     return result
 
 @app.post("/narrative/imitate")
@@ -299,8 +483,14 @@ async def translate_endpoint(
             else:
                 mime = 'audio/wav'
             audio_bytes = audio_file.file.read()
-            # Use Whisper fallback to handle many languages robustly
-            native_text = providers.transcribe_with_openai(audio_bytes, file_ext=("webm" if 'webm' in mime else 'wav'))
+            result = providers.transcribe_audio(
+                audio_bytes,
+                file_ext=("webm" if "webm" in mime else "wav"),
+                mime_type=mime,
+                instructions="Transcribe this audio recording.",
+                context=providers.CONTEXT_TRANSLATE,
+            )
+            native_text = result.text
         else:
             native_text = (text or '').strip()
         if not native_text:
@@ -314,7 +504,7 @@ async def translate_endpoint(
         return {"error": str(e)}
 
 @app.get("/narrative/options")
-async def get_speaking_options(scenario_id: int, n_per_option: int = 3, lang: str | None = None, native: str | None = None, stage: str | None = None):
+async def get_speaking_options(scenario_id: int, n_per_option: int = 3, lang: Optional[str] = None, native: Optional[str] = None, stage: Optional[str] = None):
     """Return child-friendly example utterances for the current scenario options.
 
     Query: scenario_id (int), n_per_option (int, default 3), lang (optional target language), stage (examples|hints)
@@ -330,6 +520,37 @@ async def get_speaking_options(scenario_id: int, n_per_option: int = 3, lang: st
         return data
     except Exception as e:
         return {"question": "", "options": [], "error": str(e)}
+
+
+@app.post("/api/tts")
+async def api_tts(request: Request):
+    """Return a cached/pre-rendered voice clip for a short phrase.
+
+    Body JSON: { "text": "...", "language"?: "Japanese", "voice"?: "alloy", "format"?: "mp3" }
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    text = str((body or {}).get("text") or "").strip()
+    if not text:
+        return Response(status_code=400)
+
+    language = (body or {}).get("language")
+    voice = str((body or {}).get("voice") or "alloy").strip() or "alloy"
+    fmt = str((body or {}).get("format") or "mp3").strip().lower() or "mp3"
+    if fmt not in {"mp3", "wav", "opus"}:
+        fmt = "mp3"
+
+    try:
+        meta = voice_cache.get_or_create_clip(text, language=language, voice=voice, fmt=fmt)
+        return {
+            **meta,
+            "url": f"/examples/{meta['file']}",
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/notes")
 async def read_notes():
@@ -432,8 +653,130 @@ async def get_narrative(filename: str):
     if os.path.exists(path):
         with open(path, 'r') as f:
             content = f.read()
-        return {"content": content}
-    return Response(status_code=404)
+    return {"content": content}
+
+
+@app.post("/api/stories/import")
+async def import_story(body: StoryImportRequest, request: Request):
+    """Import a story seed (text or source_url) and return playable scenarios."""
+    if not (body.attest_rights is True):
+        raise HTTPException(status_code=400, detail="attest_rights_required")
+    headers = {k.lower(): v for (k, v) in request.headers.items()}
+    _require_admin(headers, flag=bool(config.REQUIRE_ADMIN_FOR_IMPORT))
+    ip = (request.client.host if request.client else None) or _client_ip_from_headers(headers)
+    _rate_limit("import_story", str(ip), int(getattr(config, "RATE_LIMIT_IMPORT_PER_MIN", 10)))
+    text = (body.text or "").strip()
+    source_meta = None
+    if not text and (body.source_url or "").strip():
+        source_url = str(body.source_url or "").strip()
+        _validate_import_url_or_path(source_url)
+        try:
+            source_meta = await asyncio.to_thread(
+                url_fetch.fetch_url_text,
+                source_url,
+                timeout_s=float(config.URL_FETCH_TIMEOUT_S),
+                max_bytes=int(config.URL_FETCH_MAX_BYTES),
+            )
+            text = str(source_meta.get("text") or "").strip()
+            try:
+                usage.log_usage(event="url_fetch", provider="http", model="urllib", key_label="n/a", status="success")
+            except Exception:
+                pass
+        except ValueError as ve:
+            try:
+                usage.log_usage(event="url_fetch", provider="http", model="urllib", key_label="n/a", status=str(ve))
+            except Exception:
+                pass
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception:
+            try:
+                usage.log_usage(event="url_fetch", provider="http", model="urllib", key_label="n/a", status="error")
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail="source_url_fetch_failed")
+
+    if not text:
+        raise HTTPException(status_code=400, detail="missing_text")
+
+    scenarios, target_language = build_imported_scenarios(
+        text=text,
+        setting=(body.setting or (source_meta.get("title") if isinstance(source_meta, dict) else None)),
+        target_language=body.target_language,
+        max_scenes=int(body.max_scenes or 6),
+    )
+
+    activated = False
+    if body.activate:
+        try:
+            reload_scenarios(scenarios)
+            activated = True
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"activate_failed:{e}")
+
+    payload = {"scenarios": scenarios, "target_language": target_language, "activated": activated}
+    if isinstance(source_meta, dict):
+        payload["source"] = {
+            "url": source_meta.get("url"),
+            "final_url": source_meta.get("final_url"),
+            "title": source_meta.get("title"),
+            "content_type": source_meta.get("content_type"),
+        }
+    return payload
+
+
+@app.post("/api/published_runs")
+async def publish_run(request: Request):
+    """Publish a compiled scenario chain for sharing (explicit confirmation required)."""
+    headers = {k.lower(): v for (k, v) in request.headers.items()}
+    _require_admin(headers, flag=bool(config.REQUIRE_ADMIN_FOR_PUBLISH))
+    ip = (request.client.host if request.client else None) or _client_ip_from_headers(headers)
+    _rate_limit("publish_run", str(ip), int(getattr(config, "RATE_LIMIT_PUBLISH_PER_MIN", 10)))
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid_body")
+    if body.get("attest_rights") is not True:
+        raise HTTPException(status_code=400, detail="attest_rights_required")
+    if body.get("confirm_publish") is not True:
+        raise HTTPException(status_code=400, detail="confirm_publish_required")
+    scenarios = body.get("scenarios")
+    if not isinstance(scenarios, list) or not scenarios:
+        raise HTTPException(status_code=400, detail="missing_scenarios")
+    title = str(body.get("title") or "Published run")
+    target_language = str(body.get("target_language") or body.get("targetLanguage") or "")
+    run, delete_key = published_runs.create_published_run(
+        title=title,
+        target_language=target_language,
+        scenarios=[s for s in scenarios if isinstance(s, dict)],
+    )
+    payload = published_runs.public_payload(run)
+    payload["delete_key"] = delete_key
+    return payload
+
+
+@app.get("/api/published_runs/{public_id}")
+async def get_published_run(public_id: str):
+    run = published_runs.load_published_run(public_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="not_found")
+    return published_runs.public_payload(run)
+
+
+@app.delete("/api/published_runs/{public_id}")
+async def delete_published_run(public_id: str, request: Request):
+    headers = {k.lower(): v for (k, v) in request.headers.items()}
+    _require_admin(headers, flag=bool(config.REQUIRE_ADMIN_FOR_PUBLISH))
+    ip = (request.client.host if request.client else None) or _client_ip_from_headers(headers)
+    _rate_limit("publish_delete", str(ip), int(getattr(config, "RATE_LIMIT_PUBLISH_PER_MIN", 10)))
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="invalid_body")
+    delete_key = str(body.get("delete_key") or "")
+    if not delete_key.strip():
+        raise HTTPException(status_code=400, detail="missing_delete_key")
+    ok = published_runs.delete_published_run(public_id, delete_key)
+    if not ok:
+        raise HTTPException(status_code=403, detail="delete_forbidden")
+    return {"status": "ok"}
 
 @app.delete("/api/narratives/{filename}")
 async def delete_narrative(filename: str):
@@ -615,22 +958,277 @@ async def api_generate_scenarios_from_video(request: Request):
 
     Body JSON: { "url": "https://...", "target_language": "Japanese", "max_scenes": 5, "activate": true }
     """
+    body = await request.json()
+    url = (body or {}).get("url")
+    if not url or not isinstance(url, str):
+        raise HTTPException(status_code=400, detail="missing_url")
+    _validate_import_url_or_path(url)
+    headers = {k.lower(): v for (k, v) in request.headers.items()}
+    _require_admin(headers, flag=bool(config.REQUIRE_ADMIN_FOR_IMPORT))
+    ip = (request.client.host if request.client else None) or _client_ip_from_headers(headers)
+    _rate_limit("import_video", str(ip), int(getattr(config, "RATE_LIMIT_IMPORT_PER_MIN", 10)))
+    attest_rights = bool((body or {}).get("attest_rights", False))
+    if not attest_rights:
+        raise HTTPException(status_code=400, detail="attest_rights_required")
+    target_language = (body or {}).get("target_language") or "Japanese"
+    max_scenes = (body or {}).get("max_scenes") or 5
+    activate = bool((body or {}).get("activate", True))
+
+    cache_key = import_cache.video_scenarios_cache_key(url, target_language=target_language, max_scenes=max_scenes)
+    scenarios = import_cache.load_cached_video_scenarios(cache_key)
+    cache_hit = scenarios is not None
+    cache_saved = False
     try:
-        body = await request.json()
-        url = (body or {}).get("url")
-        if not url or not isinstance(url, str):
-            return Response(status_code=400)
-        target_language = (body or {}).get("target_language") or "Japanese"
-        max_scenes = (body or {}).get("max_scenes") or 5
-        activate = bool((body or {}).get("activate", True))
-        scenarios = await asyncio.to_thread(generate_scenarios_from_video, url, target_language, max_scenes)
+        usage.log_usage(
+            event=("video_cache_hit" if cache_hit else "video_cache_miss"),
+            provider="cache",
+            model="video_scenarios",
+            key_label="n/a",
+            status=("hit" if cache_hit else "miss"),
+        )
+    except Exception:
+        pass
+
+    if config.DEMO_MODE and config.DEMO_VIDEO_CACHE_ONLY and not scenarios:
+        raise HTTPException(status_code=403, detail="demo_mode_cache_only")
+
+    if not scenarios:
+        try:
+            scenarios = await asyncio.to_thread(generate_scenarios_from_video, url, target_language, max_scenes)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"video_import_failed:{e}")
+    if not scenarios:
+        raise HTTPException(status_code=502, detail="generation_failed")
+
+    dict_scenarios = [s for s in scenarios if isinstance(s, dict)]
+    if dict_scenarios:
+        normalize_scenarios(dict_scenarios, ensure_advanced=True)
+    if not cache_hit and dict_scenarios:
+        try:
+            import_cache.save_cached_video_scenarios(cache_key, dict_scenarios)
+            cache_saved = True
+        except Exception:
+            cache_saved = False
+    if activate:
+        reload_scenarios(scenarios)
+    return {
+        "status": "ok",
+        "count": len(scenarios),
+        "activated": activate,
+        "cached": cache_hit,
+        "cache_saved": cache_saved,
+        "scenarios": scenarios,
+    }
+def _validate_import_url_or_path(url: str) -> None:
+    """Enforce SSRF-safe URL rules for remote imports.
+
+    For now, only allow http/https URLs to public hosts unless ALLOW_LOCAL_IMPORT_PATHS is enabled.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="missing_url")
+    parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme in {"http", "https"}:
+        try:
+            url_fetch.validate_public_url(raw)
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+        return
+    if config.ALLOW_LOCAL_IMPORT_PATHS and parsed.scheme == "":
+        return
+    raise HTTPException(status_code=400, detail="invalid_scheme")
+
+
+def _seems_video_url(url: str) -> bool:
+    u = str(url or "").strip()
+    if not u:
+        return False
+    lower = u.lower()
+    try:
+        parsed = urllib.parse.urlsplit(u)
+        host = (parsed.hostname or "").lower()
+    except Exception:
+        host = ""
+
+    # Known "video page" hosts where we should assume video ingest.
+    video_hosts = {
+        "youtube.com",
+        "www.youtube.com",
+        "youtu.be",
+        "vimeo.com",
+        "www.vimeo.com",
+        "tiktok.com",
+        "www.tiktok.com",
+        "twitch.tv",
+        "www.twitch.tv",
+        "dailymotion.com",
+        "www.dailymotion.com",
+    }
+    if host in video_hosts:
+        return True
+
+    # Common direct media extensions.
+    for ext in (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac", ".m3u8"):
+        if lower.split("?", 1)[0].split("#", 1)[0].endswith(ext):
+            return True
+    return False
+
+
+@app.post("/api/import/auto")
+async def api_import_auto(body: AutoImportRequest, request: Request):
+    """Unified importer: takes an optional URL (default path) and optional text (extra context).
+
+    If URL looks like video -> routes to the video pipeline.
+    Otherwise -> fetches readable text from the URL and compiles it (optionally prefixed by text).
+    If no URL -> compiles the provided text.
+    """
+    if not (body.attest_rights is True):
+        raise HTTPException(status_code=400, detail="attest_rights_required")
+
+    headers = {k.lower(): v for (k, v) in request.headers.items()}
+    _require_admin(headers, flag=bool(config.REQUIRE_ADMIN_FOR_IMPORT))
+    ip = (request.client.host if request.client else None) or _client_ip_from_headers(headers)
+    _rate_limit("import_auto", str(ip), int(getattr(config, "RATE_LIMIT_IMPORT_PER_MIN", 10)))
+
+    url = (body.url or "").strip()
+    text = (body.text or "").strip()
+    target_language = body.target_language
+    max_scenes = int(body.max_scenes or 6)
+    activate = bool(body.activate)
+
+    if not url and not text:
+        raise HTTPException(status_code=400, detail="missing_input")
+
+    # Video path (default for YouTube / direct media URLs).
+    if url and _seems_video_url(url):
+        _validate_import_url_or_path(url)
+        cache_key = import_cache.video_scenarios_cache_key(url, target_language=(target_language or "Japanese"), max_scenes=max_scenes)
+        scenarios = import_cache.load_cached_video_scenarios(cache_key)
+        cache_hit = scenarios is not None
+        cache_saved = False
+
+        if config.DEMO_MODE and config.DEMO_VIDEO_CACHE_ONLY and not scenarios:
+            raise HTTPException(status_code=403, detail="demo_mode_cache_only")
+
         if not scenarios:
-            return {"error": "generation_failed"}
+            try:
+                scenarios = await asyncio.to_thread(generate_scenarios_from_video, url, (target_language or "Japanese"), max_scenes)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"video_import_failed:{e}")
+        if not scenarios:
+            raise HTTPException(status_code=502, detail="generation_failed")
+
+        dict_scenarios = [s for s in scenarios if isinstance(s, dict)]
+        if dict_scenarios:
+            normalize_scenarios(dict_scenarios, ensure_advanced=True)
+        if not cache_hit and dict_scenarios:
+            try:
+                import_cache.save_cached_video_scenarios(cache_key, dict_scenarios)
+                cache_saved = True
+            except Exception:
+                cache_saved = False
         if activate:
             reload_scenarios(scenarios)
-        return {"status": "ok", "count": len(scenarios), "activated": activate, "scenarios": scenarios}
-    except Exception as e:
-        return {"error": str(e)}
+
+        return {
+            "kind": "video",
+            "url": url,
+            "target_language": (target_language or "Japanese"),
+            "activated": activate,
+            "cached": cache_hit,
+            "cache_saved": cache_saved,
+            "scenarios": scenarios,
+        }
+
+    # Web/text path (default for arbitrary URLs with readable text).
+    source_meta = None
+    combined_text = text
+    if url:
+        _validate_import_url_or_path(url)
+        try:
+            source_meta = await asyncio.to_thread(
+                url_fetch.fetch_url_text,
+                url,
+                timeout_s=float(config.URL_FETCH_TIMEOUT_S),
+                max_bytes=int(config.URL_FETCH_MAX_BYTES),
+            )
+            fetched_text = str(source_meta.get("text") or "").strip()
+            combined_text = "\n\n".join([t for t in [text, fetched_text] if t.strip()])
+            try:
+                usage.log_usage(event="url_fetch", provider="http", model="urllib", key_label="n/a", status="success")
+            except Exception:
+                pass
+        except ValueError as ve:
+            # If URL fetch didn't yield readable text, fall back to video ingest to support "video page" URLs.
+            if str(ve) in {"no_text_found"}:
+                cache_key = import_cache.video_scenarios_cache_key(url, target_language=(target_language or "Japanese"), max_scenes=max_scenes)
+                scenarios = import_cache.load_cached_video_scenarios(cache_key)
+                cache_hit = scenarios is not None
+                cache_saved = False
+
+                if config.DEMO_MODE and config.DEMO_VIDEO_CACHE_ONLY and not scenarios:
+                    raise HTTPException(status_code=403, detail="demo_mode_cache_only")
+
+                if not scenarios:
+                    try:
+                        scenarios = await asyncio.to_thread(generate_scenarios_from_video, url, (target_language or "Japanese"), max_scenes)
+                    except Exception as e:
+                        raise HTTPException(status_code=502, detail=f"video_import_failed:{e}")
+                if not scenarios:
+                    raise HTTPException(status_code=502, detail="generation_failed")
+
+                dict_scenarios = [s for s in scenarios if isinstance(s, dict)]
+                if dict_scenarios:
+                    normalize_scenarios(dict_scenarios, ensure_advanced=True)
+                if not cache_hit and dict_scenarios:
+                    try:
+                        import_cache.save_cached_video_scenarios(cache_key, dict_scenarios)
+                        cache_saved = True
+                    except Exception:
+                        cache_saved = False
+                if activate:
+                    reload_scenarios(scenarios)
+                return {
+                    "kind": "video",
+                    "url": url,
+                    "target_language": (target_language or "Japanese"),
+                    "activated": activate,
+                    "cached": cache_hit,
+                    "cache_saved": cache_saved,
+                    "scenarios": scenarios,
+                }
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception:
+            raise HTTPException(status_code=502, detail="source_url_fetch_failed")
+
+    scenarios, resolved_language = build_imported_scenarios(
+        text=combined_text,
+        setting=(body.setting or (source_meta.get("title") if isinstance(source_meta, dict) else None)),
+        target_language=target_language,
+        max_scenes=max_scenes,
+    )
+
+    if activate:
+        try:
+            reload_scenarios(scenarios)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"activate_failed:{e}")
+
+    payload = {
+        "kind": ("web" if url else "text"),
+        "url": url or None,
+        "target_language": resolved_language,
+        "activated": activate,
+        "scenarios": scenarios,
+    }
+    if isinstance(source_meta, dict):
+        payload["source"] = {
+            "url": source_meta.get("url"),
+            "final_url": source_meta.get("final_url"),
+            "title": source_meta.get("title"),
+            "content_type": source_meta.get("content_type"),
+        }
+    return payload
 
 @app.get("/api/scenario-versions")
 async def api_list_scenario_versions():

@@ -12,6 +12,9 @@
   export let translating = false;
   export let isNativeRecording = false;
   export let fallbackOptions = [];
+  export let mode = 'beginner';
+  export let judgeFocus = 0; // 0 = learning-first, 1 = story-first
+  export let languageOverride = ''; // '' = auto, else language name
 
   const dispatch = createEventDispatcher();
 
@@ -31,9 +34,85 @@
   const handleToggleNativeRecording = () => {
     dispatch('toggleNativeRecording');
   };
+
+  $: normalizedMode = (mode || '').toLowerCase() === 'advanced' ? 'advanced' : 'beginner';
+  $: isTimeStopMode = normalizedMode !== 'advanced';
+  $: prepMessage = isTimeStopMode
+    ? 'Time Stop tools — experiment safely here before you risk a rewind.'
+    : 'Live mode tools — translator + make-your-own stay safe between live turns.';
+  $: makeNoteText = isTimeStopMode
+    ? 'Translates while time is frozen — no lives at risk.'
+    : 'Translates without costing lives even while the live mic is active.';
+
+  const clamp01 = (v) => {
+    const num = Number(v);
+    if (!Number.isFinite(num)) return 0;
+    return Math.min(1, Math.max(0, num));
+  };
+
+  const handleJudgeInput = (event) => {
+    judgeFocus = clamp01(event?.currentTarget?.value);
+  };
+
+  $: judgeFocus = clamp01(judgeFocus);
+  $: judgePresetLabel = judgeFocus >= 0.66 ? 'Story-first' : (judgeFocus <= 0.34 ? 'Learning-first' : 'Balanced');
+  $: judgeHint = judgeFocus >= 0.66
+    ? 'More permissive: prioritize story progression.'
+    : (judgeFocus <= 0.34 ? 'Stricter: prioritize target-language performance.' : 'Balanced: mix learning and story goals.');
+
+  const normalizeLanguage = (v) => {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    const lowered = raw.toLowerCase();
+    if (['auto', 'default', 'none'].includes(lowered)) return '';
+    if (['ja', 'jp', 'japanese'].includes(lowered)) return 'Japanese';
+    if (['en', 'eng', 'english'].includes(lowered)) return 'English';
+    if (['es', 'spa', 'spanish', 'espanol', 'español'].includes(lowered)) return 'Spanish';
+    return raw;
+  };
+
+  const handleLanguageChange = (event) => {
+    languageOverride = normalizeLanguage(event?.currentTarget?.value);
+  };
+
+  $: languageOverride = normalizeLanguage(languageOverride);
 </script>
 
 <div class="options-block">
+  <div class={`prep-banner ${isTimeStopMode ? 'time-stop' : 'live-mode'}`} role="note">
+    {prepMessage}
+  </div>
+  <div class="judge-panel" role="group" aria-label="Judge focus">
+    <div class="judge-header">
+      <div class="judge-title">Judge focus</div>
+      <div class="judge-pill">{judgePresetLabel}</div>
+    </div>
+    <div class="judge-row">
+      <div class="judge-side">Learning</div>
+      <input
+        class="judge-slider"
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value={judgeFocus}
+        on:input={handleJudgeInput}
+      />
+      <div class="judge-side">Story</div>
+    </div>
+    <div class="judge-hint">{judgeHint}</div>
+  </div>
+  <div class="language-panel" role="group" aria-label="Target language">
+    <div class="language-header">
+      <div class="language-title">Target language</div>
+    </div>
+    <select class="language-select" value={languageOverride} on:change={handleLanguageChange}>
+      <option value="">Auto</option>
+      <option value="English">English</option>
+      <option value="Spanish">Spanish</option>
+      <option value="Japanese">Japanese</option>
+    </select>
+  </div>
   {#if localSuggestions || speakingSuggestions}
     <h3 class="prompt-question">
       {requireRepeat
@@ -111,6 +190,7 @@
 
   <div class="make-own">
     <div class="make-label">Make your own line</div>
+    <div class="make-note">{makeNoteText}</div>
     <div class="make-row">
       <input
         class="make-input"
@@ -139,6 +219,109 @@
     width: 100%;
     margin-top: 8px;
     text-align: left;
+  }
+
+  .prep-banner {
+    background: #ecfdf5;
+    border: 1px solid #6ee7b7;
+    color: #047857;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+  }
+
+  .prep-banner.live-mode {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    color: #1d4ed8;
+  }
+
+  .judge-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+
+  .judge-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .judge-title {
+    font-weight: 700;
+    color: #0f172a;
+    font-size: 0.95rem;
+  }
+
+  .judge-pill {
+    font-size: 0.8rem;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #312e81;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .judge-row {
+    display: grid;
+    grid-template-columns: 72px 1fr 56px;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .judge-side {
+    font-size: 0.85rem;
+    color: #334155;
+    font-weight: 600;
+  }
+
+  .judge-slider {
+    width: 100%;
+  }
+
+  .judge-hint {
+    margin-top: 6px;
+    font-size: 0.85rem;
+    color: #475569;
+  }
+
+  .language-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+
+  .language-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .language-title {
+    font-weight: 700;
+    color: #0f172a;
+    font-size: 0.95rem;
+  }
+
+  .language-select {
+    width: 100%;
+    background: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    color: #0f172a;
   }
 
   .prompt-question {
@@ -215,15 +398,24 @@
     background: #e5e7eb;
   }
 
-  .make-own {
-    margin-top: 16px;
-  }
+.make-own {
+  margin-top: 16px;
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: 10px;
+}
 
-  .make-label {
-    font-weight: 600;
-    margin-bottom: 6px;
-    color: #374151;
-  }
+.make-label {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #374151;
+}
+
+.make-note {
+  font-size: 0.8rem;
+  color: #4b5563;
+  margin-bottom: 6px;
+}
 
   .make-row {
     display: flex;
