@@ -2,7 +2,7 @@
 
 This board is for **decisions that only you can make** (product, policy, pricing, risk posture). It complements `development/task_board.md` (implementation work) and `development/open-questions.md` (loose questions).
 
-Last updated: 2025-12-28 02:11 UTC
+Last updated: 2026-01-21 09:38 UTC
 
 Use the template under each item: pick an option, confirm the intent, and we’ll lock it into docs + code.
 
@@ -37,7 +37,7 @@ If you only have 5 minutes, decide these four first:
   - **B)** Lightweight auth (magic link / email OTP). Saves in a DB, private runs resolve anywhere.
   - **C)** OAuth-only (Google/Apple). Faster onboarding, more infra/config.
 - **Default recommendation:** **B** (magic link) + keep publish/share explicit.
-- **Needs from you:** pick A/B/C, and “must-have” fields (email only? username? age gate?).
+- **Decision:** **B** (magic link) with **email-only** onboarding; no extra fields required at signup.
 
 ### D2 — IP / content responsibility policy (import + share)
 
@@ -51,7 +51,8 @@ If you only have 5 minutes, decide these four first:
   - **A)** Share only compiled Scenario[] (current behavior).
   - **B)** Allow sharing the original source link + excerpt (higher IP/privacy risk).
 - **Default recommendation:** store **derived-only by default** + share **compiled-only** + require rights attestation for import/publish.
-- **Needs from you:** choose storage option + sharing option, and whether we want a takedown workflow (email/contact + “report” link).
+- **Decision (sharing):** private-by-default; sharing happens later via explicit publish, with **unique share routes per story** (monetization criteria TBD).
+- **Needs from you:** choose storage option + takedown workflow (email/contact + “report” link), and confirm if sharing should expose compiled-only artifacts.
 
 ### D3 — Import caching/dedupe scope (waste reduction)
 
@@ -74,6 +75,7 @@ If you only have 5 minutes, decide these four first:
   - Trial: max imports/day, max video minutes/day, max streaming minutes/day.
   - Demo: allow LLM import? allow real streaming? (currently gated by env flags).
   - Paid: what lifts (quotas, history, cloud saves, org sharing).
+- **Decision:** free tier is the main marketing loop with heavy reuse/caching; **paid unlocks story import and generation**.
 
 ### D5 — Private run links vs published share links
 
@@ -83,6 +85,7 @@ If you only have 5 minutes, decide these four first:
   - **A)** `/play/<id>` is always private to your account; sharing requires publish (`/share/<public_id>`).
   - **B)** Allow “private share links” for specific recipients (needs auth + permissions).
 - **Default recommendation:** **A** for v1.
+- **Decision:** **A**, with **unique share routes per story** created for explicit publish/share; private by default.
 
 ### D6 — Streaming transcript retention + privacy
 
@@ -93,6 +96,7 @@ If you only have 5 minutes, decide these four first:
   - **B)** Persist transcripts per user for history/analytics with retention controls.
   - **C)** Persist only aggregate metrics (no raw text).
 - **Default recommendation:** **A or C** until accounts + consent UI exist.
+- **Needs from you:** pick A/B/C and confirm retention window (if any), plus whether free tier is allowed to store transcripts.
 
 ## Needs More Clarity / Research (pick a direction)
 
@@ -108,6 +112,7 @@ If you only have 5 minutes, decide these four first:
 - **Examples:** plain HTML pages, YouTube, direct mp4/webm, PDFs, paywalled sites, social embeds.
 - **Why:** Each category changes tooling, SSRF surface, and cost.
 - **Default recommendation:** v1 = http/https + HTML text extraction + YouTube/direct video via ffmpeg/yt-dlp; add PDFs and “complex scraping” later.
+- **Decision:** support “any URL”; if the page has video(s), prefer video (ask which if multiple); if text-only, use text; if extraction is incoherent, ask the user to confirm intent with choices.
 
 ## Done / Locked (already implemented)
 

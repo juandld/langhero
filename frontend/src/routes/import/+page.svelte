@@ -4,6 +4,7 @@
   import { onMount } from 'svelte';
   import { createRun } from '$lib/runStore.js';
   import DemoModeBanner from '$lib/components/DemoModeBanner.svelte';
+  import { apiFetch } from '$lib/api';
 
   let url = '';
   let text = '';
@@ -100,7 +101,7 @@
     }
     importing = true;
     try {
-      const res = await fetch(`${getBackendUrl()}/api/import/auto`, {
+      const res = await apiFetch(`${getBackendUrl()}/api/import/auto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

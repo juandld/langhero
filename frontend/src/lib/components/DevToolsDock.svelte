@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
   import { getBackendUrl } from '$lib/config';
+  import { apiFetch } from '$lib/api';
   import { runsStore } from '$lib/runStore.js';
   import { DEVTOOLS_ENABLED } from '$lib/devtools';
 
@@ -123,9 +124,9 @@
     backendUrl = getBackendUrl();
     try {
       const [metaRes, weeklyRes, recentRes] = await Promise.all([
-        fetch(`${backendUrl}/api/meta`),
-        fetch(`${backendUrl}/api/usage/weekly`),
-        fetch(`${backendUrl}/api/usage/recent?limit=150&days=7`),
+        apiFetch(`${backendUrl}/api/meta`),
+        apiFetch(`${backendUrl}/api/usage/weekly`),
+        apiFetch(`${backendUrl}/api/usage/recent?limit=150&days=7`),
       ]);
       meta = metaRes.ok ? await metaRes.json() : null;
       weekly = weeklyRes.ok ? await weeklyRes.json() : null;

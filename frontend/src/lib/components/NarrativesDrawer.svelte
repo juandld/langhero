@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/api';
 
   type Narrative = {
     filename: string;
@@ -17,7 +18,7 @@
 
   async function getNarratives() {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives`);
+      const response = await apiFetch(`${BACKEND_URL}/api/narratives`);
       if (response.ok) {
         const filenames: string[] = await response.json();
         narratives = filenames.map((filename) => ({ filename }));
@@ -31,7 +32,7 @@
 
   async function getNarrativeContent(filename: string) {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives/${filename}`);
+      const response = await apiFetch(`${BACKEND_URL}/api/narratives/${filename}`);
       if (response.ok) {
         const data = await response.json();
         selectedNarrative = { filename, content: data.content };
@@ -45,7 +46,7 @@
 
   async function deleteNarrative(filename: string) {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/narratives/${filename}`, {
+      const response = await apiFetch(`${BACKEND_URL}/api/narratives/${filename}`, {
         method: 'DELETE'
       });
       if (response.ok) {

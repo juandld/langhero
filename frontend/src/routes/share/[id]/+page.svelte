@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { getBackendUrl, discoverBackend } from '$lib/config';
+  import { apiFetch } from '$lib/api';
   import { createRun } from '$lib/runStore.js';
 
   let loading = true;
@@ -25,7 +26,7 @@
     error = '';
     published = null;
     try {
-      const res = await fetch(`${getBackendUrl()}/api/published_runs/${encodeURIComponent(publicId)}`, {
+      const res = await apiFetch(`${getBackendUrl()}/api/published_runs/${encodeURIComponent(publicId)}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });

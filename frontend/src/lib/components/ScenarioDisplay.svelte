@@ -1,7 +1,10 @@
 <script>
   import { storyStore } from '$lib/storyStore.js';
   import { getBackendUrl, discoverBackend, getStreamMode } from '$lib/config';
+  import { apiFetch } from '$lib/api';
+  import { getAuthToken } from '$lib/auth';
   import { activeRunId, getRun, syncFromStorage, updateRun } from '$lib/runStore.js';
+  import { profileStore } from '$lib/profileStore';
   import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import ScenarioHeader from './scenario/ScenarioHeader.svelte';
@@ -9,6 +12,67 @@
   import ScenarioOptionsPanel from './scenario/ScenarioOptionsPanel.svelte';
   import MockStreamPanel from './scenario/MockStreamPanel.svelte';
   import ScenarioControls from './scenario/ScenarioControls.svelte';
+  import SocialToast from './SocialToast.svelte';
+  import { normalizeLanguage } from '$lib/utils/language';
+  import { STORAGE_KEYS } from '$lib/utils';
+  import {
+    getMicrophoneDevices,
+    setupAudioAnalyser,
+    disconnectAnalyser,
+    playBeep
+  } from '$lib/game/audioUtils';
+  import { createStreamingManager } from '$lib/game/streamingManager';
+  import { createGameState } from '$lib/game/gameStateStore';
+  import { createPromptPlayer } from '$lib/game/audioPromptManager';
+
+  // Initialize shared game state and streaming manager
+  const gameState = createGameState();
+  const {
+    lives: livesStore,
+    livesTotal: livesTotalStore,
+    score: scoreStore,
+    judgeFocus: judgeFocusStore,
+    languageOverride: languageOverrideStore,
+    penaltyMessage: penaltyMessageStore,
+    lastHeard: lastHeardStore,
+    matchConfidence: matchConfidenceStore,
+    matchType: matchTypeStore,
+    initialized: runLivesInitializedStore,
+    isGameOver,
+    resetLives,
+    addScore,
+    loseLife,
+    applyUpdate: applyGameStateUpdate,
+    applyResult: applyGameStateResult,
+    clearPenalty,
+    loadFromStorage: loadGameStateFromStorage,
+    persistToStorage: persistGameStateToStorage,
+    syncToRun,
+    setRun,
+    getState: getGameState
+  } = gameState;
+
+  // Local variables bound to stores for template use
+  $: lives = $livesStore;
+  $: livesTotal = $livesTotalStore;
+  $: score = $scoreStore;
+  $: penaltyMessage = $penaltyMessageStore;
+  $: lastHeard = $lastHeardStore;
+  $: matchConfidence = $matchConfidenceStore;
+  $: matchType = $matchTypeStore;
+  $: runLivesInitialized = $runLivesInitializedStore;
+
+  // Two-way bindable variables that sync with stores
+  let judgeFocus = 0;
+  let languageOverride = '';
+
+  // Sync stores -> local when stores change
+  $: if ($judgeFocusStore !== judgeFocus) judgeFocus = $judgeFocusStore;
+  $: if ($languageOverrideStore !== languageOverride) languageOverride = $languageOverrideStore;
+
+  // Sync local -> stores when local changes (from child component bindings)
+  $: judgeFocusStore.set(judgeFocus);
+  $: languageOverrideStore.set(normalizeLanguage(languageOverride));
 
   let audioPlayer; // Bind to the audio element
   let isRecording = false;
@@ -20,40 +84,14 @@
   $: targetLang = ($storyStore?.language && typeof $storyStore.language === 'string' && $storyStore.language.trim())
     ? $storyStore.language
     : ($storyStore?.character_dialogue_jp ? 'Japanese' : 'English');
-  const normalizeLanguageOverride = (v) => {
-    const raw = String(v || '').trim();
-    if (!raw) return '';
-    const lowered = raw.toLowerCase();
-    if (['auto', 'default', 'none'].includes(lowered)) return '';
-    if (['ja', 'jp', 'japanese'].includes(lowered)) return 'Japanese';
-    if (['en', 'eng', 'english'].includes(lowered)) return 'English';
-    if (['es', 'spa', 'spanish', 'espanol', 'español'].includes(lowered)) return 'Spanish';
-    return raw;
-  };
-  let languageOverride = '';
-  $: languageOverride = normalizeLanguageOverride(languageOverride);
   $: effectiveTargetLang = languageOverride || targetLang;
   const nativeLang = 'English'; // TODO: make user-configurable
-  let audioCtx = null;
   let requireRepeat = false;
   let selectedOption = null; // { next_scenario, example: { native, target, audio } }
-  let lives = 3;
-  let livesTotal = 3;
-  let score = 0;
-  let runLivesInitialized = false;
-  let lastRunIdForState = null;
-  let lastSavedScore = null;
-  let lastSavedLivesTotal = null;
-  let lastSavedLivesRemaining = null;
-  let penaltyMessage = '';
   let devMode = false;
-  let lastHeard = '';
-  let matchConfidence = null;
-  let matchType = '';
   let evaluating = false;
   let micDevices = [];
   let micDeviceId = '';
-  const MIC_KEY = 'LANGHERO_MIC_DEVICE_ID_V1';
   let recordingStream = null;
   let nativeStream = null;
   // Make-your-own line (native -> translate -> try)
@@ -62,21 +100,51 @@
   let isNativeRecording = false;
   let nativeRecorder;
   let nativeChunks = [];
-  let judgeFocus = 0; // 0 = learning-first, 1 = story-first
   let streamMode = 'real';
-  let streamingEnabled = false;
-  let streamStatus = 'disabled';
-  let streamEvents = [];
-  let streamSocket = null;
-  let liveTranscript = '';
   let waveCanvas;
+  let audioAnalyser = null;
   let scenarioMode = 'beginner';
   let trackRun = false;
   let currentRunId = null;
+  let unsubRun = null;
+  let lastRunIdForState = null;
+  let lastSavedScore = null;
+  let lastSavedLivesTotal = null;
+  let lastSavedLivesRemaining = null;
   let lastSavedJudgeFocus = null;
   let lastSavedLanguageOverride = null;
-  let unsubRun = null;
-  const ttsCache = new Map(); // key -> absolute URL
+
+  // Initialize streaming manager
+  const streamingManager = createStreamingManager({
+    getScenario: () => get(storyStore),
+    getLanguage: () => effectiveTargetLang,
+    getGameState: () => getGameState(),
+    onStateUpdate: applyGameStateUpdate,
+    onTranscript: (text) => { /* transcript handled via store subscription */ },
+    onResult: (result, opts) => applyInteractionResult(result, opts),
+    onPenalty: (data) => {
+      if (lives === 0) {
+        alert('Out of lives. Try a different option.');
+        requireRepeat = false;
+      }
+    },
+    onError: (err) => console.error('[Stream] error:', err)
+  });
+
+  // Subscribe to streaming manager stores
+  const { status: streamStatusStore, events: streamEventsStore, transcript: streamTranscriptStore } = streamingManager;
+  $: streamStatus = $streamStatusStore;
+  $: streamEvents = $streamEventsStore;
+  $: liveTranscript = $streamTranscriptStore;
+  $: streamingEnabled = streamingManager.isEnabled();
+
+  // Social feedback toast state
+  let showToast = false;
+  let toastMessage = '';
+  let toastStyleGained = '';
+  let toastSentiment = 'neutral';
+  let toastKey = 0; // Forces new toast component on each trigger
+
   $: scenarioMode = (() => {
     const raw = typeof $storyStore?.mode === 'string' ? $storyStore.mode : '';
     if (typeof raw === 'string') {
@@ -88,62 +156,12 @@
   })();
   $: isLiveScenario = scenarioMode === 'advanced';
 
-  function ensureAudioContext() {
-    // Lazily create a shared AudioContext (resumed on interaction)
-    if (!audioCtx) {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (Ctx) audioCtx = new Ctx();
-    }
-    if (audioCtx?.state === 'suspended') {
-      audioCtx.resume().catch(() => {});
-    }
-    return audioCtx;
-  }
-
-  function playBeep({ duration = 250, frequency = 880, volume = 0.25, type = 'sine' } = {}) {
-    const ctx = ensureAudioContext();
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(frequency, ctx.currentTime);
-    // simple attack/decay to avoid click
-    const now = ctx.currentTime;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration / 1000);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + duration / 1000 + 0.05);
-  }
-
-  function resetLives(total = livesTotal) {
-    const candidate = Number.isFinite(total) ? Number(total) : livesTotal;
-    const safeTotal = Number.isFinite(candidate) && candidate > 0 ? Math.floor(candidate) : 3;
-    livesTotal = safeTotal;
-    lives = safeTotal;
-  }
-
-  function resetStreamState(forceActive) {
-    const active = typeof forceActive === 'boolean' ? forceActive : streamingEnabled;
-    streamEvents = [];
-    liveTranscript = '';
-    streamStatus = active ? 'idle' : 'disabled';
-    penaltyMessage = '';
-  }
-
+  // Reactive: enable/disable streaming based on mode
   $: {
     const shouldStream = streamMode !== 'off' && isLiveScenario;
-    if (streamingEnabled !== shouldStream) {
-      streamingEnabled = shouldStream;
-      if (streamingEnabled) {
-        resetStreamState(true);
-      } else {
-        closeStream('mode_disabled');
-        streamEvents = [];
-        liveTranscript = '';
-        streamStatus = 'disabled';
-      }
+    if (streamingManager.isEnabled() !== shouldStream) {
+      streamingManager.setEnabled(shouldStream);
+      streamingManager.setMode(streamMode);
     }
   }
 
@@ -153,7 +171,7 @@
     const example = detail.example || null;
     selectedOption = { next_scenario: nextScenario, example };
     requireRepeat = true;
-    lastHeard = '';
+    lastHeardStore.set('');
     playPrompt(example);
   }
 
@@ -161,314 +179,28 @@
 
   async function refreshMicDevices() {
     try {
-      if (typeof navigator === 'undefined' || !navigator?.mediaDevices?.enumerateDevices) return;
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const inputs = (devices || [])
-        .filter((d) => d && d.kind === 'audioinput')
-        .map((d, idx) => ({
-          deviceId: String(d.deviceId || ''),
-          label: String(d.label || '').trim() || `Microphone ${idx + 1}`,
-        }))
-        .filter((d) => Boolean(d.deviceId));
-      micDevices = inputs;
-      if (micDeviceId && !inputs.some((d) => d.deviceId === micDeviceId)) {
+      const devices = await getMicrophoneDevices();
+      micDevices = devices;
+      if (micDeviceId && !devices.some((d) => d.deviceId === micDeviceId)) {
         micDeviceId = '';
-        try { localStorage.removeItem(MIC_KEY); } catch (_) {}
+        try { localStorage.removeItem(STORAGE_KEYS.MIC_DEVICE_ID); } catch (_) {}
       }
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
   function persistMicChoice() {
     try {
       const id = String(micDeviceId || '').trim();
-      if (!id) localStorage.removeItem(MIC_KEY);
-      else localStorage.setItem(MIC_KEY, id);
+      if (!id) localStorage.removeItem(STORAGE_KEYS.MIC_DEVICE_ID);
+      else localStorage.setItem(STORAGE_KEYS.MIC_DEVICE_ID, id);
     } catch (_) {}
   }
 
-  function toBackendUrl(pathOrUrl) {
-    const raw = String(pathOrUrl || '').trim();
-    if (!raw) return '';
-    if (/^https?:\/\//.test(raw)) return raw;
-    const backend = getBackendUrl().replace(/\/$/, '');
-    const normalized = raw.startsWith('/') ? raw : `/${raw}`;
-    return `${backend}${normalized}`;
-  }
-
-  async function fetchTtsUrl(text) {
-    const phrase = String(text || '').trim();
-    if (!phrase) return '';
-    const cacheKey = `${(effectiveTargetLang || '').trim().toLowerCase()}::${phrase}`;
-    if (ttsCache.has(cacheKey)) return ttsCache.get(cacheKey) || '';
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: phrase, language: effectiveTargetLang }),
-      });
-      const data = res.ok ? await res.json() : null;
-      if (data?.error) {
-        console.warn('TTS failed', data.error);
-      }
-      const url = toBackendUrl(data?.url || '');
-      if (url) ttsCache.set(cacheKey, url);
-      return url;
-    } catch (_) {
-      return '';
-    }
-  }
-
-  async function playPrompt(example) {
-    try {
-      const ex = example || null;
-      const url = toBackendUrl(ex?.audio || '');
-      let finalUrl = url;
-      if (!finalUrl) {
-        finalUrl = await fetchTtsUrl(ex?.target || ex?.native || '');
-      }
-      if (!finalUrl) {
-        const spoken = speakAssistant(ex?.target || ex?.native || '', effectiveTargetLang);
-        if (!spoken) playBeep();
-        return;
-      }
-      if (!audioPlayer) return;
-      audioPlayer.src = finalUrl;
-      try {
-        await audioPlayer.play();
-      } catch (_) {
-        const spoken = speakAssistant(ex?.target || ex?.native || '', effectiveTargetLang);
-        if (!spoken) playBeep();
-      }
-    } catch (_) {
-      const ex = example || null;
-      const spoken = speakAssistant(ex?.target || ex?.native || '', effectiveTargetLang);
-      if (!spoken) playBeep();
-      return;
-    }
-  }
-
-  function speakAssistant(text, language) {
-    const phrase = String(text || '').trim();
-    if (!phrase) return false;
-    try {
-      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
-      const synth = window.speechSynthesis;
-      synth.cancel();
-      const utter = new SpeechSynthesisUtterance(phrase);
-      const lang = String(language || '').toLowerCase();
-      if (lang.includes('japanese') || lang === 'ja') utter.lang = 'ja-JP';
-      else if (lang.includes('english') || lang === 'en') utter.lang = 'en-US';
-      else utter.lang = 'en-US';
-      // Robotic-ish defaults for the "time machine assistant".
-      utter.rate = 1.05;
-      utter.pitch = 0.7;
-      utter.volume = 1.0;
-      try {
-        const voices = synth.getVoices ? synth.getVoices() : [];
-        if (voices && voices.length) {
-          const preferred = voices.find((v) => v.lang === utter.lang && /synth|robot|elect|mono/i.test(v.name))
-            || voices.find((v) => v.lang === utter.lang);
-          if (preferred) utter.voice = preferred;
-        }
-      } catch (_) {}
-      synth.speak(utter);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  function ensureStreamConnection() {
-    if (!streamingEnabled) return;
-    if (streamSocket && (streamSocket.readyState === WebSocket.OPEN || streamSocket.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-    const backend = getBackendUrl();
-    const path = streamMode === 'mock' ? '/stream/mock' : '/stream/interaction';
-    const wsUrl = backend.replace(/^http/, backend.startsWith('https') ? 'wss' : 'ws') + path;
-    try {
-      const ws = new WebSocket(wsUrl);
-      ws.binaryType = 'arraybuffer';
-      streamStatus = 'connecting';
-      streamEvents = [];
-
-      ws.onopen = () => {
-        streamStatus = 'open';
-        const scenario = get(storyStore);
-        const payload = {
-          scenario_id: scenario?.id ?? null,
-          language: effectiveTargetLang,
-          judge: judgeFocus,
-          score,
-          lives_total: livesTotal,
-          lives_remaining: lives,
-        };
-        try {
-          ws.send(JSON.stringify(payload));
-        } catch (err) {
-          console.error('stream init failed', err);
-        }
-      };
-
-      ws.onmessage = (event) => {
-        let data;
-        try {
-          data = typeof event.data === 'string' ? JSON.parse(event.data) : JSON.parse(new TextDecoder().decode(event.data));
-        } catch (err) {
-          console.warn('stream non-json message', err);
-          return;
-        }
-        handleStreamEvent(data);
-      };
-
-      ws.onerror = () => {
-        streamStatus = 'error';
-      };
-
-      ws.onclose = () => {
-        if (streamStatus !== 'final') {
-          streamStatus = 'closed';
-        }
-        streamSocket = null;
-      };
-
-      streamSocket = ws;
-    } catch (err) {
-      console.error('stream connection error', err);
-      streamStatus = 'error';
-    }
-  }
-
-  async function sendStreamChunk(blob) {
-    if (!streamingEnabled) return;
-    if (!streamSocket || streamSocket.readyState !== WebSocket.OPEN) return;
-    if (!blob || !blob.size) return;
-    try {
-      const buffer = await blob.arrayBuffer();
-      streamSocket.send(buffer);
-    } catch (err) {
-      console.error('stream send error', err);
-    }
-  }
-
-  function signalStreamStop(reason = 'stop') {
-    if (!streamSocket || streamSocket.readyState !== WebSocket.OPEN) return;
-    try {
-      streamSocket.send(reason);
-    } catch (err) {
-      console.error('stream stop error', err);
-    }
-  }
-
-  function closeStream(reason = 'cleanup') {
-    if (!streamSocket) return;
-    try {
-      if (streamSocket.readyState === WebSocket.OPEN) {
-        streamSocket.send(reason);
-      }
-      streamSocket.close();
-    } catch (err) {
-      console.error('stream close error', err);
-    } finally {
-      streamSocket = null;
-    }
-  }
-
-  function handleStreamEvent(data) {
-    if (!data || typeof data !== 'object') return;
-    streamEvents = [...streamEvents.slice(-19), data];
-    const evt = data.event;
-    if (evt === 'ready') {
-      streamStatus = 'open';
-      if (typeof data.lives_total === 'number') {
-        livesTotal = Math.max(1, data.lives_total);
-      }
-      if (typeof data.lives_remaining === 'number') {
-        lives = Math.max(0, Math.min(livesTotal, data.lives_remaining));
-      } else {
-        lives = Math.max(0, Math.min(livesTotal, lives));
-      }
-      if (typeof data.score === 'number') {
-        score = Math.max(0, data.score);
-      }
-      penaltyMessage = '';
-      runLivesInitialized = true;
-      return;
-    }
-    if (evt === 'reset') {
-      streamStatus = 'open';
-      if (typeof data.lives_total === 'number') {
-        livesTotal = Math.max(1, data.lives_total);
-      }
-      if (typeof data.lives_remaining === 'number') {
-        lives = Math.max(0, Math.min(livesTotal, data.lives_remaining));
-      } else {
-        lives = Math.max(0, Math.min(livesTotal, lives));
-      }
-      if (typeof data.score === 'number') {
-        score = Math.max(0, data.score);
-      }
-      penaltyMessage = '';
-      runLivesInitialized = true;
-      return;
-    }
-    if (evt === 'partial') {
-      streamStatus = 'streaming';
-      liveTranscript = data.transcript || '';
-      return;
-    }
-    if (evt === 'penalty') {
-      streamStatus = 'penalty';
-      if (typeof data.lives_total === 'number') {
-        livesTotal = Math.max(1, data.lives_total);
-      }
-      if (typeof data.lives_remaining === 'number') {
-        lives = Math.max(0, data.lives_remaining);
-      } else {
-        const delta = (typeof data.lives_delta === 'number' && Number.isFinite(data.lives_delta)) ? data.lives_delta : -1;
-        lives = Math.max(0, lives + delta);
-      }
-      if (typeof data.score === 'number') {
-        score = data.score;
-      }
-      penaltyMessage = data.message || `Try that again in ${effectiveTargetLang}.`;
-      playBeep({ frequency: 420, duration: 160 });
-      if (lives === 0) {
-        alert('Out of lives. Try a different option.');
-        requireRepeat = false;
-      }
-      return;
-    }
-    if (evt === 'final') {
-      streamStatus = 'final';
-      liveTranscript = data?.result?.heard || liveTranscript;
-      if (typeof data.score === 'number') {
-        score = data.score;
-      }
-      if (typeof data.lives_total === 'number') {
-        livesTotal = Math.max(1, data.lives_total);
-      }
-      if (typeof data.lives_remaining === 'number') {
-        lives = Math.max(0, data.lives_remaining);
-      }
-      const finalResult = data?.result || {};
-      if (!finalResult?.error) {
-        penaltyMessage = '';
-      }
-      applyInteractionResult(data?.result, { fromStream: true });
-      return;
-    }
-    if (evt === 'error') {
-      streamStatus = 'error';
-      return;
-    }
-    if (evt === 'info') {
-      // leave status unchanged
-      return;
-    }
-  }
+  // Use shared audio prompt player
+  const playPrompt = createPromptPlayer({
+    getAudioPlayer: () => audioPlayer,
+    getLanguage: () => effectiveTargetLang
+  });
 
   // Reactive: update audio src; defer autoplay until user interacts
   let userInteracted = false;
@@ -483,30 +215,40 @@
 
   function applyInteractionResult(result, { fromStream = false } = {}) {
     if (!result || typeof result !== 'object') return;
-    lastHeard = result?.heard || '';
-    const c = Number(result?.confidence ?? result?.match_confidence ?? result?.matchConfidence);
-    matchConfidence = Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : null;
-    matchType = String(result?.match_type ?? result?.matchType ?? '');
+
+    // Apply result to game state (handles lastHeard, matchConfidence, matchType, score, lives)
+    applyGameStateResult(result);
+
     if (!fromStream) {
       const deltaScore = Number(result?.scoreDelta ?? 0);
       if (Number.isFinite(deltaScore) && deltaScore !== 0) {
-        score = Math.max(0, score + Math.round(deltaScore));
+        addScore(Math.round(deltaScore));
       }
       const deltaLives = Number(result?.livesDelta ?? 0);
       if (Number.isFinite(deltaLives) && deltaLives !== 0) {
-        lives = Math.max(0, lives + deltaLives);
-        if (lives <= 0) {
+        loseLife(-deltaLives); // loseLife subtracts, so negate
+        if (get(livesStore) <= 0) {
           requireRepeat = false;
         }
       }
       if (result?.error) {
-        penaltyMessage = String(result.error);
+        penaltyMessageStore.set(String(result.error));
       } else if (typeof result?.message === 'string' && result.message.trim()) {
-        penaltyMessage = result.message.trim();
+        penaltyMessageStore.set(result.message.trim());
       } else {
-        penaltyMessage = '';
+        clearPenalty();
       }
     }
+
+    // Show social feedback toast if present
+    if (result?.socialFeedback) {
+      toastMessage = result.socialFeedback;
+      toastStyleGained = result?.styleGained || '';
+      toastSentiment = result?.socialSentiment || 'neutral';
+      toastKey += 1;
+      showToast = true;
+    }
+
     if (result?.repeatExpected) {
       selectedOption = {
         next_scenario: (result?.repeatNextScenario ?? null),
@@ -520,6 +262,12 @@
       playPrompt(selectedOption.example);
     } else if (result?.nextScenario) {
       const next = result.nextScenario;
+
+      // Update player profile on successful scenario completion
+      const styleGained = result?.styleGained || null;
+      const stylePoints = Number(result?.stylePoints ?? 1);
+      profileStore.completeScenario(styleGained, stylePoints);
+
       if (typeof next === 'object' && next?.id) {
         storyStore.goToScenario(next.id);
       } else if (typeof next === 'number') {
@@ -537,11 +285,14 @@
       // Stop recording
       if (mediaRecorder && mediaRecorder.state !== "inactive") {
         if (streamingEnabled) {
-          signalStreamStop('stop');
+          streamingManager.signalStop('stop');
         }
         mediaRecorder.stop();
       }
       isRecording = false;
+      // Clean up analyser
+      audioAnalyser = null;
+      disconnectAnalyser();
     } else {
       // Start recording
       try {
@@ -550,11 +301,14 @@
         recordingStream = stream;
         mediaRecorder = new MediaRecorder(stream);
 
+        // Setup audio analyser for waveform visualization
+        audioAnalyser = setupAudioAnalyser(stream);
+
         mediaRecorder.ondataavailable = async event => {
           if (!event?.data) return;
           audioChunks.push(event.data);
           if (streamingEnabled) {
-            await sendStreamChunk(event.data);
+            await streamingManager.sendChunk(event.data);
           }
         };
 
@@ -576,14 +330,14 @@
           try {
             if (requireRepeat && selectedOption) {
               evaluating = true;
-              lastHeard = '';
-              matchConfidence = null;
-              matchType = '';
+              lastHeardStore.set('');
+              matchConfidenceStore.set(null);
+              matchTypeStore.set('');
               formData.append('expected', selectedOption.example?.target || '');
               if (selectedOption.next_scenario != null) formData.append('next_scenario', String(selectedOption.next_scenario));
               if (effectiveTargetLang) formData.append('lang', effectiveTargetLang);
               formData.append('judge', String(judgeFocus));
-              const response = await fetch(`${getBackendUrl()}/narrative/imitate`, { method: 'POST', body: formData });
+              const response = await apiFetch(`${getBackendUrl()}/narrative/imitate`, { method: 'POST', body: formData });
               if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const result = await response.json();
               applyInteractionResult(result);
@@ -591,7 +345,7 @@
               formData.append('current_scenario_id', $storyStore.id);
               if (effectiveTargetLang) formData.append('lang', effectiveTargetLang);
               formData.append('judge', String(judgeFocus));
-              const response = await fetch(`${getBackendUrl()}/narrative/interaction`, { method: 'POST', body: formData });
+              const response = await apiFetch(`${getBackendUrl()}/narrative/interaction`, { method: 'POST', body: formData });
               if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const result = await response.json();
               applyInteractionResult(result);
@@ -604,8 +358,8 @@
 
         audioChunks = [];
         if (streamingEnabled) {
-          resetStreamState();
-          ensureStreamConnection();
+          clearPenalty();
+          streamingManager.connect();
           mediaRecorder.start(200);
         } else {
           mediaRecorder.start();
@@ -642,59 +396,61 @@
       const run = getRun(currentRunId);
       if (run) {
         const storedFocus = Number(run.judgeFocus);
-        if (Number.isFinite(storedFocus)) judgeFocus = Math.min(1, Math.max(0, storedFocus));
+        if (Number.isFinite(storedFocus)) judgeFocusStore.set(Math.min(1, Math.max(0, storedFocus)));
         if (typeof run.languageOverride === 'string' && run.languageOverride.trim()) {
-          languageOverride = run.languageOverride;
+          languageOverrideStore.set(run.languageOverride);
         }
         if (typeof run.score === 'number') {
-          score = Math.max(0, Math.floor(run.score));
+          scoreStore.set(Math.max(0, Math.floor(run.score)));
         }
         const storedLivesTotal = Number(run.livesTotal);
         if (Number.isFinite(storedLivesTotal) && storedLivesTotal > 0) {
-          livesTotal = Math.floor(storedLivesTotal);
+          livesTotalStore.set(Math.floor(storedLivesTotal));
         }
         const storedLivesRemaining = Number(run.livesRemaining);
+        const currentLivesTotal = get(livesTotalStore);
         if (Number.isFinite(storedLivesRemaining) && storedLivesRemaining >= 0) {
-          lives = Math.max(0, Math.min(livesTotal, Math.floor(storedLivesRemaining)));
-          runLivesInitialized = true;
+          livesStore.set(Math.max(0, Math.min(currentLivesTotal, Math.floor(storedLivesRemaining))));
+          runLivesInitializedStore.set(true);
         } else if (Number.isFinite(storedLivesTotal) && storedLivesTotal > 0) {
-          lives = Math.max(0, Math.min(livesTotal, livesTotal));
-          runLivesInitialized = true;
+          livesStore.set(Math.max(0, currentLivesTotal));
+          runLivesInitializedStore.set(true);
         }
-        lastSavedScore = score;
-        lastSavedLivesTotal = livesTotal;
-        lastSavedLivesRemaining = lives;
+        lastSavedScore = get(scoreStore);
+        lastSavedLivesTotal = get(livesTotalStore);
+        lastSavedLivesRemaining = get(livesStore);
       }
     }
     unsubRun = activeRunId.subscribe((id) => {
       if (trackRun && id && id !== lastRunIdForState) {
         const run = getRun(id);
-        penaltyMessage = '';
-        runLivesInitialized = false;
+        clearPenalty();
+        runLivesInitializedStore.set(false);
         if (run) {
           const storedFocus = Number(run.judgeFocus);
-          if (Number.isFinite(storedFocus)) judgeFocus = Math.min(1, Math.max(0, storedFocus));
+          if (Number.isFinite(storedFocus)) judgeFocusStore.set(Math.min(1, Math.max(0, storedFocus)));
           if (typeof run.languageOverride === 'string' && run.languageOverride.trim()) {
-            languageOverride = run.languageOverride;
+            languageOverrideStore.set(run.languageOverride);
           }
           if (typeof run.score === 'number') {
-            score = Math.max(0, Math.floor(run.score));
+            scoreStore.set(Math.max(0, Math.floor(run.score)));
           } else {
-            score = 0;
+            scoreStore.set(0);
           }
           const storedLivesTotal = Number(run.livesTotal);
-          livesTotal = (Number.isFinite(storedLivesTotal) && storedLivesTotal > 0) ? Math.floor(storedLivesTotal) : 3;
+          livesTotalStore.set((Number.isFinite(storedLivesTotal) && storedLivesTotal > 0) ? Math.floor(storedLivesTotal) : 3);
           const storedLivesRemaining = Number(run.livesRemaining);
-          lives = (Number.isFinite(storedLivesRemaining) && storedLivesRemaining >= 0) ? Math.max(0, Math.min(livesTotal, Math.floor(storedLivesRemaining))) : livesTotal;
-          runLivesInitialized = true;
+          const currentLivesTotal = get(livesTotalStore);
+          livesStore.set((Number.isFinite(storedLivesRemaining) && storedLivesRemaining >= 0) ? Math.max(0, Math.min(currentLivesTotal, Math.floor(storedLivesRemaining))) : currentLivesTotal);
+          runLivesInitializedStore.set(true);
         } else {
-          score = 0;
-          livesTotal = 3;
-          lives = 3;
+          scoreStore.set(0);
+          livesTotalStore.set(3);
+          livesStore.set(3);
         }
-        lastSavedScore = score;
-        lastSavedLivesTotal = livesTotal;
-        lastSavedLivesRemaining = lives;
+        lastSavedScore = get(scoreStore);
+        lastSavedLivesTotal = get(livesTotalStore);
+        lastSavedLivesRemaining = get(livesStore);
         lastRunIdForState = id;
       }
       currentRunId = id;
@@ -705,7 +461,7 @@
       devMode = (import.meta?.env?.DEV === true) || /[?&]dev=1\b/.test(window.location.search) || localStorage.getItem('DEV_BACK') === '1';
     } catch (_) {}
     try {
-      micDeviceId = String(localStorage.getItem(MIC_KEY) || '').trim();
+      micDeviceId = String(localStorage.getItem(STORAGE_KEYS.MIC_DEVICE_ID) || '').trim();
     } catch (_) {}
     refreshMicDevices();
     try {
@@ -719,18 +475,32 @@
     // Resolve backend dynamically if needed
     discoverBackend().catch(() => {});
 
+    // Listen for rank up events
+    const handleRankUp = (e) => {
+      const { newRank } = e.detail || {};
+      if (newRank) {
+        toastMessage = `Congratulations! You've become a ${newRank}!`;
+        toastStyleGained = '';
+        toastSentiment = 'positive';
+        toastKey += 1;
+        showToast = true;
+      }
+    };
+    window.addEventListener('langhero:rankup', handleRankUp);
+
     streamMode = getStreamMode();
-    resetStreamState(streamMode !== 'off' && isLiveScenario);
+    streamingManager.setMode(streamMode);
+    streamingManager.setEnabled(streamMode !== 'off' && isLiveScenario);
     try {
       const stored = localStorage.getItem('JUDGE_FOCUS');
       if (stored != null && String(stored).trim() !== '') {
         const v = Number(stored);
-        if (Number.isFinite(v)) judgeFocus = Math.min(1, Math.max(0, v));
+        if (Number.isFinite(v)) judgeFocusStore.set(Math.min(1, Math.max(0, v)));
       }
     } catch (_) {}
     try {
       const stored = localStorage.getItem('LANGUAGE_OVERRIDE');
-      if (stored != null) languageOverride = String(stored);
+      if (stored != null) languageOverrideStore.set(String(stored));
     } catch (_) {}
 
     // Client-only fetching of speaking suggestions on scenario changes
@@ -738,7 +508,7 @@
     const fetchSuggestions = async (sid) => {
       try {
         const url = `${getBackendUrl()}/narrative/options?scenario_id=${encodeURIComponent(sid)}&n_per_option=3&lang=${encodeURIComponent(effectiveTargetLang)}&native=${encodeURIComponent(nativeLang)}&stage=examples`;
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         speakingSuggestions = res.ok ? await res.json() : null;
       } catch (e) {
         speakingSuggestions = null;
@@ -763,12 +533,12 @@
 
       if (s.id !== lastScenarioId) {
         lastScenarioId = s.id;
-        penaltyMessage = '';
+        clearPenalty();
         requireRepeat = false;
         selectedOption = null;
-        lastHeard = '';
-        matchConfidence = null;
-        matchType = '';
+        lastHeardStore.set('');
+        matchConfidenceStore.set(null);
+        matchTypeStore.set('');
         evaluating = false;
         myNativeText = '';
         const scenarioLives = Number(s?.lives ?? s?.max_lives ?? s?.lives_total);
@@ -776,19 +546,17 @@
           const nextTotal = Math.floor(scenarioLives);
           if (!runLivesInitialized) {
             resetLives(nextTotal);
-            runLivesInitialized = true;
           } else if (nextTotal > 0 && nextTotal !== livesTotal) {
-            livesTotal = nextTotal;
-            lives = Math.min(lives, livesTotal);
+            livesTotalStore.set(nextTotal);
+            livesStore.update(l => Math.min(l, nextTotal));
           }
         } else if (!runLivesInitialized) {
           resetLives(livesTotal);
-          runLivesInitialized = true;
         }
         const nextMode = (typeof s?.mode === 'string' && s.mode.trim().toLowerCase() === 'advanced') ? 'advanced' : 'beginner';
         const liveForScenario = nextMode === 'advanced' && streamMode !== 'off';
-        closeStream('scenario_change');
-        resetStreamState(liveForScenario);
+        streamingManager.close('scenario_change');
+        streamingManager.setEnabled(liveForScenario);
         // Only fetch if no local examples available
         if (!localSuggestions) fetchSuggestions(s.id);
       }
@@ -796,6 +564,7 @@
     return () => {
       unsub();
       window.removeEventListener('click', handleFirstInteraction);
+      window.removeEventListener('langhero:rankup', handleRankUp);
       try {
         navigator?.mediaDevices?.removeEventListener?.('devicechange', refreshMicDevices);
       } catch (_) {}
@@ -853,7 +622,7 @@
   }
 
   onDestroy(() => {
-    closeStream('component_destroy');
+    streamingManager.close('component_destroy');
   });
   onDestroy(() => {
     try {
@@ -871,7 +640,7 @@
       fd.append('native', 'English');
       fd.append('target', effectiveTargetLang);
       fd.append('text', t);
-      const res = await fetch(`${getBackendUrl()}/narrative/translate`, { method: 'POST', body: fd });
+      const res = await apiFetch(`${getBackendUrl()}/narrative/translate`, { method: 'POST', body: fd });
       const data = res.ok ? await res.json() : null;
       if (data && (data.target || data.native)) {
         selectedOption = { next_scenario: null, example: { native: data.native || t, target: data.target || '', pronunciation: data.pronunciation || '' } };
@@ -908,7 +677,7 @@
           fd.append('target', effectiveTargetLang);
           fd.append('audio_file', blob, 'native_recording.webm');
           try {
-            const res = await fetch(`${getBackendUrl()}/narrative/translate`, { method: 'POST', body: fd });
+            const res = await apiFetch(`${getBackendUrl()}/narrative/translate`, { method: 'POST', body: fd });
             const data = res.ok ? await res.json() : null;
             if (data && (data.target || data.native)) {
               selectedOption = { next_scenario: null, example: { native: data.native || '', target: data.target || '', pronunciation: data.pronunciation || '' } };
@@ -932,6 +701,18 @@
 <!-- The actual audio element, hidden from the user -->
 <audio bind:this={audioPlayer}></audio>
 
+<!-- Social feedback toast -->
+{#if showToast}
+  {#key toastKey}
+    <SocialToast
+      message={toastMessage}
+      styleGained={toastStyleGained}
+      sentiment={toastSentiment}
+      onDismiss={() => { showToast = false; }}
+    />
+  {/key}
+{/if}
+
 <div class="scenario-container">
   <ScenarioHeader
     imageUrl={$storyStore.image_url}
@@ -943,10 +724,12 @@
   <ScenarioControls
     bind:waveCanvas
     {isRecording}
+    {evaluating}
     {devMode}
     {micDevices}
     bind:micDeviceId
     mode={scenarioMode}
+    analyser={audioAnalyser}
     on:toggle={toggleRecording}
     on:devBack={() => storyStore.goBack()}
     on:refreshMics={refreshMicDevices}

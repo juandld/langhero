@@ -85,8 +85,10 @@ def _parse_provider_pref(raw: Optional[str]) -> list[str]:
 # Provider preference order per transcription context
 TRANSCRIBE_PROVIDER_DEFAULT = _parse_provider_pref(os.getenv("TRANSCRIBE_PROVIDER_DEFAULT", "auto"))
 TRANSCRIBE_PROVIDER_OVERRIDES = {
-    "interaction": _parse_provider_pref(os.getenv("TRANSCRIBE_INTERACTION_PROVIDER")),
-    "streaming": _parse_provider_pref(os.getenv("TRANSCRIBE_STREAMING_PROVIDER")),
+    "interaction": _parse_provider_pref(os.getenv("TRANSCRIBE_INTERACTION_PROVIDER", "openai,gemini")),
+    # Streaming defaults to OpenAI Whisper — a dedicated ASR model that doesn't
+    # hallucinate like Gemini's multimodal transcription does.
+    "streaming": _parse_provider_pref(os.getenv("TRANSCRIBE_STREAMING_PROVIDER", "openai,gemini")),
     "translate": _parse_provider_pref(os.getenv("TRANSCRIBE_TRANSLATE_PROVIDER")),
     "imitate": _parse_provider_pref(os.getenv("TRANSCRIBE_IMITATE_PROVIDER")),
     "notes": _parse_provider_pref(os.getenv("TRANSCRIBE_NOTES_PROVIDER")),
@@ -126,6 +128,15 @@ REQUIRE_ADMIN_FOR_IMPORT = _env_flag("REQUIRE_ADMIN_FOR_IMPORT", default=False)
 REQUIRE_ADMIN_FOR_PUBLISH = _env_flag("REQUIRE_ADMIN_FOR_PUBLISH", default=False)
 REQUIRE_ADMIN_FOR_STREAM = _env_flag("REQUIRE_ADMIN_FOR_STREAM", default=False)
 
+# Appwrite auth (magic link + JWT verification).
+APPWRITE_ENDPOINT = (os.getenv("APPWRITE_ENDPOINT") or "").strip()
+APPWRITE_PROJECT_ID = (os.getenv("APPWRITE_PROJECT_ID") or "").strip()
+APPWRITE_API_KEY = (os.getenv("APPWRITE_API_KEY") or "").strip()
+
+REQUIRE_AUTH_FOR_IMPORT = _env_flag("REQUIRE_AUTH_FOR_IMPORT", default=False)
+REQUIRE_AUTH_FOR_PUBLISH = _env_flag("REQUIRE_AUTH_FOR_PUBLISH", default=False)
+REQUIRE_AUTH_FOR_STREAM = _env_flag("REQUIRE_AUTH_FOR_STREAM", default=False)
+
 # Streaming caps (WebSocket /stream/interaction).
 STREAM_MAX_CHUNK_BYTES = int(os.getenv("STREAM_MAX_CHUNK_BYTES", "262144"))  # 256 KiB
 STREAM_MAX_BUFFER_BYTES = int(os.getenv("STREAM_MAX_BUFFER_BYTES", "2000000"))  # ~2 MB rolling buffer
@@ -161,7 +172,7 @@ def _collect_allowed_origins() -> list[str]:
     csv = (os.getenv("ALLOWED_ORIGINS") or "").strip()
     if csv:
         return [o.strip() for o in csv.split(",") if o.strip()]
-    ports = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180]
+    ports = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180, 5199, 5200, 5201, 5202, 5203]
     origins = []
     for p in ports:
         origins.append(f"http://localhost:{p}")

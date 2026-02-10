@@ -1,6 +1,9 @@
 # Task Board
 
 ## Session Log
+- 2026-01-21 09:38 UTC — Added Appwrite magic-link login flow (frontend), auth-aware fetch/WebSocket wiring, and backend Appwrite JWT verification with auth gating flags.
+- 2026-01-21 09:38 UTC — Captured founder decisions: magic-link auth (email-only), private-by-default sharing with unique share routes, free-tier marketing with paid import/generation, and “any URL” ingest with video selection + text fallback + intent disambiguation.
+- 2025-01-21 04:24 UTC — Added a production hardening runbook section to `development/deployment.md` (proxy headers to forward, WS origin strategy, and deployment readiness checklist).
 - 2025-12-28 01:24 UTC — Aligned dev workflow with narritive-hero: env-driven CORS, phone-first tunnel-ready dev, and frontend public backend URL handling. Updated `backend/config.py` + `backend/main.py` to accept `ALLOWED_ORIGIN_*`/`ALLOWED_ORIGIN_REGEX`; enhanced `frontend/src/lib/config.ts` to honor `PUBLIC_BACKEND_URL` and avoid self-probing; revamped root `dev.sh` to pick stable per-repo ports, optionally start fast Cloudflare tunnels, and print public URLs. Implications: multiple repos can run concurrently; phone access works via throwaway URLs; `/api/tts` contract unchanged; backend dev respects `PORT`. Validation: `bash tests/test_all.sh` (backend 43 passed; frontend 13 passed).
 - 2025-12-28 01:09 UTC — Synced `project_updates/` with the current cross-project operator workflow from `narritive-hero` (phone-first fast tunnels, stable `/api/tts`, token-budget discipline, and upgrade prompt/pack). Implications: Codex can ramp on LangHero with the same standards used by the decision orchestrator. Validation: `bash tests/test_all.sh` (backend tests pass; frontend Vitest fails with EPERM writing under `frontend/node_modules/.vite-temp` in this environment).
 - 2025-12-26 00:42 UTC — Added microphone device selector to the recording controls (choose input device, refresh list; selection persisted in localStorage). Implemented in `ScenarioControls` + `ScenarioDisplay` and releases mic tracks after recording to allow easy switching.
@@ -55,26 +58,26 @@ Track and resolve these in `development/decision-board.md` (they unblock clean i
 
 | Decision | Why it matters | Status |
 | --- | --- | --- |
-| D1 Accounts + “Login” scope | determines cross-device saves, quotas, and auth strategy | Needs decision |
-| D2 IP/content responsibility policy | determines what we store/serve and what’s shareable | Needs decision |
+| D1 Accounts + “Login” scope | determines cross-device saves, quotas, and auth strategy | Decided (magic link, email-only) |
+| D2 IP/content responsibility policy | determines what we store/serve and what’s shareable | Partially decided (private-by-default share; storage/takedown TBD) |
 | D3 Cache/dedupe scope | biggest cost-saver + biggest privacy foot-gun | Needs decision |
-| D4 Free vs trial vs paid knobs | keeps marketing cheap + prevents cost abuse | Needs decision |
-| D5 `/play/<id>` vs `/share/<id>` semantics | defines private vs public sharing | Needs decision |
+| D4 Free vs trial vs paid knobs | keeps marketing cheap + prevents cost abuse | Partially decided (free marketing; paid import+generation; quotas TBD) |
+| D5 `/play/<id>` vs `/share/<id>` semantics | defines private vs public sharing | Decided (private-by-default; unique share routes on publish) |
 | D6 Streaming transcript retention | defines privacy posture + compliance surface | Needs decision |
-| D8 URL ingestion scope | defines what “any URL” means and what we build first | Needs decision |
+| D8 URL ingestion scope | defines what “any URL” means and what we build first | Decided (video selection + text fallback + intent check) |
 
 ## Next Logical Steps (LLM / Engineering)
 
 These are the next implementation tasks that follow directly from what’s already shipped:
 
 1. **Run the `/demo` smoke checklist and log results** (`development/demo-smoke.md`) → close M4.
-2. **Add CI guardrails for M6**: run `bash tests/test_all.sh`, `pip-audit`, `npm audit` on PRs; add basic secret scanning + minimal SAST.
-3. **Finalize production hardening runbook**: document required proxy headers + WS origin strategy and add a deployment readiness checklist.
-4. **URL ingest expansion v1 (after D8)**: define supported URL classes and add extraction support incrementally (HTML → video → PDFs → “complex sites”).
-5. **Auth (after D1/D5)**: wire `/login` into real sessions and enforce auth/quotas on import/publish/stream endpoints (replace admin-key gating).
+2. **Magic-link auth rollout (email-only)**: configure Appwrite env, verify login, then enable `REQUIRE_AUTH_FOR_*` on import/publish/stream (incl. WS).
+3. **Private-by-default sharing**: create unique share routes per story; publish toggles public access.
+4. **URL ingest “any URL” flow**: analyze URL, prefer video (ask if multiple), fallback to text, and prompt for intent when extraction is incoherent.
+5. **Appwrite backend migration**: map filesystem stores (notes, narratives, published runs, import cache) into Appwrite Database + Storage with a migration script.
+6. **Add CI guardrails for M6**: run `bash tests/test_all.sh`, `pip-audit`, `npm audit` on PRs; add basic secret scanning + minimal SAST.
 
 ## Queue / Ideas
-- Document deployment readiness checklist for M6 Production Hardening.
 - Revisit notes UI wiring once backend endpoints stabilize.
 
 ## Operator Shortcuts

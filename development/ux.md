@@ -10,9 +10,14 @@
 
 ## Temporal Tools
 
-- **Time Stop** — freezes the moment so the traveler can rehearse safely (translator, examples, make-your-own phrase editor).
-- **Time Rewind** — limited lives stored as rewind charges; a failed main-record attempt spends one and resets the scene.
+- **Time Stop** — freezes the moment so the traveler can rehearse safely (suggestion cards, Ask Bimbo translation, tap-to-hear).
+- **Time Rewind** — lives represent narrative survival, not pronunciation retries. A life is spent when the player's words cause the characters or world to kill them. Speech quality alone never costs a life.
 - **Time Fast-Forward** — optional escape hatch to skip a volatile scenario when survival matters more than rewards or branching content.
+- **Dialogue Rewind** — during narrative sequences (intro, briefings, cutscenes), players can rewind to previous dialogue lines. This is a "free" time tool available at the start of the journey. As players advance deeper into hostile timelines, this luxury erodes:
+  - **Tutorial/Intro**: Unlimited rewind (arrow key, back button)
+  - **Early Story**: Limited rewind charges per scene
+  - **Advanced Chapters**: No rewind — narrative plays forward only, reinforcing the danger and irreversibility of choices
+  - The mechanic teaches players to pay attention and creates tension as they lose temporal safety nets
 
 ## Voice & Reality Layers (North Star)
 
@@ -53,19 +58,65 @@ If a line comes from a *tool*, it must sound like the assistant. If it comes fro
 
 
 
+## Ask Bimbo — Creative Expression
+
+Bimbo is the player's time-travel companion. When the player wants to say something creative or off-script, they type it in English and Ask Bimbo.
+
+**Flow:**
+1. Player types intent in English (e.g., "I am god reincarnated")
+2. Single LLM call: Bimbo translates to natural Japanese + gives a funny, personality-driven remark + optionally matches to an existing option
+3. Backend calls `providers.romanize()` for reliable romaji (never trusts LLM romaji)
+4. Frontend shows a **pronunciation card**: Japanese (large, bold) + romaji (italic, purple) + English (gray) + tap-to-hear speaker icon
+5. Audio auto-plays the Japanese translation in Bimbo's voice
+6. If the intent happens to match an existing option, that card highlights too
+7. Player speaks → result card shows what they said + how it landed (category) + Continue/Skip
+
+**Key principle:** The suggestion cards are not "correct answers." They are helpful examples. The player can say anything. The result card never shows an "expected" answer — only what the player said and how it landed.
+
+## Response Categories
+
+Every spoken response is categorized by its narrative tone, not its pronunciation accuracy:
+
+| Category | Icon | Color | Examples |
+|---|---|---|---|
+| Diplomatic | 🕊 | Green | polite, charming, humble, friendly |
+| Pragmatic | ⚖ | Blue | cautious, honest, safe, vague, silent |
+| Bold | ⚡ | Orange | direct, bold, desperate |
+| Hostile | 🔥 | Red | hostile, defiant, threatening |
+| History-Breaking | ✦ | Purple | insightful — changes the course of events |
+
+The category appears on the result card after speaking, giving the player a sense of how their words landed in the story world. This connects language practice to narrative consequence.
+
+## Result Card
+
+After speaking, the result card shows:
+
+**On success (good/perfect match):**
+- Quality label ("Perfect!", "Great!", "Good!")
+- What the player said (Japanese + English translation)
+- Response category badge (e.g., "🔥 Hostile")
+- **Continue →** button (no auto-advance — player reads and reflects)
+
+**On non-success (any other result):**
+- What the player said (Japanese + English translation)
+- Response category badge
+- **Try again or Skip →** button
+
+**Never shown:** "expected" answers, pronunciation scores, lives lost from speech quality.
+
 ## Guardrails
 
-- The main record button represents a risky in-world action; once pressed, success or failure burns or saves lives (`time skip charges`).
-- Translator / make-your-own tools are explicitly safe prep zones: no lives lost, no penalties, and the UI reinforces that distinction.
-- Speaking in a language other than the target after pressing the main record button triggers an immediate miss (life loss plus retry prompt).
-- Provide context messaging that explains the penalty in narrative terms (“The locals panic when they can’t understand you—try again in Japanese.”).
+- The main record button commits the player's words to the story world. The narrative reacts to what they say.
+- **Lives are narrative consequences**: a life is lost when the player's words cause characters to kill them, betray them, or place them in a fatal situation. Speech recognition quality (match score, tier) never costs a life. The story decides who lives and dies, not the speech engine.
+- Suggestion cards / Ask Bimbo / tap-to-hear are explicitly safe prep zones: no consequences, and the UI reinforces that distinction.
+- Speaking in a language other than the target after pressing the main record button triggers a retry prompt with narrative framing ("The locals can't understand you — try again in Japanese.").
 
 ## MVP Experience
 
-- **Beginner (time-stop)**: a short loop that lets learners rehearse, see examples, and submit when ready. Shows score/lives and stresses that lives are consumed only when the main record button is used.
-- **Advanced (streaming)**: live transcript ticker, penalty callouts, and automatic lives/score updates that match the backend contract (`scoreDelta` / `livesDelta`). Translator tools remain clearly out-of-band, and time fast-forward affords a narrative skip when designers allow it.
-- **Shared HUD**: scoreboard stays consistent between modes and resets when scenarios change; wrong-language prompts recommend the target phrase with pronunciation while framing the danger narrative (rewind spent, timeline reset).
-- **Accessibility**: every penalty message is actionable (“Please answer in Japanese…”) and the HUD remains screen-reader friendly (`role="alert"` for penalties).
+- **Beginner (time-stop)**: time freezes, suggestion cards appear, player can tap to hear examples or Ask Bimbo for creative translations. Press Speak when ready. Result shows what was said + how it landed. Continue when ready — no auto-advance.
+- **Advanced (streaming)**: live transcript ticker, category callouts, and automatic score updates. Narrative consequences (including life loss) come from the story, not the speech engine.
+- **Shared HUD**: scoreboard stays consistent between modes. Lives represent narrative survival. Score rewards effort and creativity.
+- **Accessibility**: every result message is actionable and the HUD remains screen-reader friendly (`role="alert"` for results).
 
 ## Marketing / Trial Guardrails
 

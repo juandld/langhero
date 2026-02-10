@@ -120,6 +120,27 @@ Prefer setting these at the edge (nginx/caddy) rather than in-app:
 - `Referrer-Policy: no-referrer` (or `strict-origin-when-cross-origin`)
 - `X-Frame-Options: DENY` (or CSP `frame-ancestors 'none'`)
 
-Verification checklist:
-- Confirm the SPA works (menu/import/play/share) under the CSP.
-- Confirm `/stream/*` websocket upgrade works through the proxy.
+Also pass standard proxy headers so the backend sees the public scheme/host:
+
+- `Host`
+- `X-Real-IP`
+- `X-Forwarded-For`
+- `X-Forwarded-Proto`
+
+## WebSocket origin strategy (production)
+
+When you front LangHero with a single public origin, treat that origin as the only valid WS origin:
+
+- Set backend allowlist env vars (e.g. `ALLOWED_ORIGIN_1=https://app.example.com` or `ALLOWED_ORIGIN_REGEX`) to the production domain.
+- If you control the reverse proxy, block unexpected `Origin` headers for `/stream/*` before they hit the app.
+- Avoid exposing the backend directly on the public internet; keep it behind the proxy.
+
+## Deployment readiness checklist
+
+- HTTPS enabled at the edge; HSTS set only after TLS is stable.
+- Reverse proxy passes `/api/*`, `/narrative/*`, `/voice_notes/*`, `/examples/*`, and `/stream/*` to the backend with upgrade headers for WebSockets.
+- Security headers applied and validated against the SPA (menu/import/play/share).
+- Backend allowlist env vars set for the production origin (CORS + WS origin checks).
+- Persistent volumes mounted for notes, scenarios, caches, and published runs.
+- Demo mode flags and admin gating set appropriately for the environment.
+- Smoke check: `/stream/*` websocket upgrade succeeds through the proxy.

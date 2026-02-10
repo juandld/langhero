@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { apiFetch } from '$lib/api';
 
   export let note: {
     filename: string;
@@ -47,7 +48,7 @@
 
   async function saveTags(tags: { label: string; color?: string }[]) {
     try {
-      await fetch(`${BACKEND_URL}/api/notes/${note.filename}/tags`, {
+      await apiFetch(`${BACKEND_URL}/api/notes/${note.filename}/tags`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tags })

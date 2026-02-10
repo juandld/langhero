@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getBackendUrl } from '$lib/config';
+  import { apiFetch } from '$lib/api';
 
   type BackendMeta = {
     demo_mode?: boolean;
@@ -18,7 +19,7 @@
   onMount(async () => {
     error = '';
     try {
-      const res = await fetch(`${getBackendUrl()}/api/meta`);
+      const res = await apiFetch(`${getBackendUrl()}/api/meta`);
       if (!res.ok) return;
       const data = await res.json();
       if (data && typeof data === 'object') meta = data;
@@ -63,4 +64,3 @@
     font-size: 0.9rem;
   }
 </style>
-

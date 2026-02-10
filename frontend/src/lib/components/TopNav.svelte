@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
+  import ProfileBadge from '$lib/components/ProfileBadge.svelte';
 
   const links = [
     { href: '/', label: 'Menu' },
@@ -19,6 +20,9 @@
 <header class="topnav">
   <div class="inner">
     <a class="brand" href="/" aria-label="LangHero menu">LangHero</a>
+    <div class="profile-section">
+      <ProfileBadge compact />
+    </div>
     <nav class="nav" aria-label="Primary">
       {#each links as l (l.href)}
         <a class={`link ${isActive(l.href) ? 'active' : ''}`} href={l.href}>{l.label}</a>
@@ -60,6 +64,12 @@
 
   .brand:hover {
     background: #f8fafc;
+  }
+
+  .profile-section {
+    flex: 1;
+    display: flex;
+    justify-content: center;
   }
 
   .nav {

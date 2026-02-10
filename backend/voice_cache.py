@@ -11,8 +11,11 @@ from uuid import uuid4
 
 import config
 import providers
+import voice_select
 
+# Synthesizer signature: (text, voice, format, instructions?) -> bytes
 Synthesizer = Callable[[str, str, str], bytes]
+SynthesizerWithInstructions = Callable[[str, str, str, Optional[str]], bytes]
 
 
 def iter_examples(scenarios: list[dict]) -> Iterable[Tuple[int, int, int, str, str]]:
@@ -31,6 +34,27 @@ def iter_examples(scenarios: list[dict]) -> Iterable[Tuple[int, int, int, str, s
                 example_lang = (example.get("language") or "").strip()
                 lang = example_lang or option_lang or scenario_lang
                 yield int(scenario_id), opt_idx, ex_idx, target, lang
+
+
+def iter_examples_with_context(scenarios: list[dict]) -> Iterable[Tuple[int, int, int, str, str, dict, dict, dict]]:
+    """Yield (scenario_id, option_idx, example_idx, target_text, language_hint, scenario, option, example).
+
+    Extended version that includes full context for voice selection.
+    """
+    for scenario in scenarios:
+        scenario_id = scenario.get("id")
+        if scenario_id is None:
+            continue
+        scenario_lang = (scenario.get("language") or "").strip()
+        for opt_idx, option in enumerate(scenario.get("options") or []):
+            option_lang = (option.get("language") or "").strip()
+            for ex_idx, example in enumerate(option.get("examples") or []):
+                target = (example.get("target") or "").strip()
+                if not target:
+                    continue
+                example_lang = (example.get("language") or "").strip()
+                lang = example_lang or option_lang or scenario_lang
+                yield int(scenario_id), opt_idx, ex_idx, target, lang, scenario, option, example
 
 
 def normalize_phrase(text: str, language: str | None = None) -> str:
@@ -187,18 +211,34 @@ def get_or_create_clip(
     expand_variants: bool = False,
     dry_run: bool = False,
     synthesizer: Synthesizer | None = None,
+    instructions: str | None = None,
 ) -> dict:
     """Return a manifest-backed voice clip for the given phrase.
 
     The clip is deduplicated across identical phrases (via normalization key).
     Returns metadata: {clip_id, phrase_id, file, voice, format}.
+
+    Args:
+        instructions: Optional TTS instructions for sentiment/style (e.g., "Speak warmly")
     """
     output_dir = output_dir or Path(config.EXAMPLES_AUDIO_DIR)
     manifest_path = manifest_path or (output_dir / "manifest.json")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    synth = synthesizer or providers.tts_with_openai
-    key = normalize_phrase(phrase, language)
+    # Wrap synthesizer to include instructions
+    base_synth = synthesizer or providers.tts_with_openai
+
+    def synth_with_instructions(text: str, v: str, f: str) -> bytes:
+        return base_synth(text, v, f, instructions)
+
+    # Include sentiment in cache key if provided
+    cache_key_suffix = ""
+    if instructions:
+        # Hash instructions for shorter key
+        inst_hash = hashlib.md5(instructions.encode()).hexdigest()[:8]
+        cache_key_suffix = f":{inst_hash}"
+
+    key = normalize_phrase(phrase, language) + cache_key_suffix
     manifest = load_manifest(manifest_path)
     entry = _ensure_entry(manifest, key, phrase, language)
 
@@ -214,10 +254,13 @@ def get_or_create_clip(
             output_dir=output_dir,
             voice=voice,
             fmt=fmt,
-            synthesizer=synth,
+            synthesizer=synth_with_instructions,
             dry_run=dry_run,
             stats=None,
         )
+        # Store instructions in variant metadata
+        if instructions:
+            variant["instructions"] = instructions
     else:
         variant = _select_variant(entry)
 
@@ -227,7 +270,7 @@ def get_or_create_clip(
         phrase=phrase,
         voice=voice,
         fmt=fmt,
-        synthesizer=synth,
+        synthesizer=synth_with_instructions,
         dry_run=dry_run,
         stats=None,
     )
@@ -241,6 +284,7 @@ def get_or_create_clip(
         "file": variant["file"],
         "voice": variant.get("voice", voice),
         "format": variant.get("format", fmt),
+        "instructions": variant.get("instructions"),
     }
 
 
@@ -258,8 +302,14 @@ def generate_for_scenarios(
     expand_variants: bool = False,
     write_copies: bool = False,
     synthesizer: Synthesizer | None = None,
+    auto_voice: bool = True,
 ) -> GenerationStats:
-    """Batch-generate cached phrase clips for scenario example phrases."""
+    """Batch-generate cached phrase clips for scenario example phrases.
+
+    Args:
+        auto_voice: If True, automatically select voice based on scenario/option metadata.
+                   Falls back to `voice` param if no metadata available.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = GenerationStats(dry_run=dry_run)
     manifest = load_manifest(manifest_path)
@@ -267,7 +317,19 @@ def generate_for_scenarios(
     processed_keys: set[str] = set()
     synth_func = synthesizer or providers.tts_with_openai
 
-    for scenario_id, opt_idx, ex_idx, text, language in iter_examples(scenarios):
+    for scenario_id, opt_idx, ex_idx, text, language, scenario, option, example in iter_examples_with_context(scenarios):
+        # Select voice based on context or use default
+        if auto_voice:
+            selected_voice = voice_select.select_voice(
+                scenario=scenario,
+                option=option,
+                example=example,
+                role="npc",
+                default=voice,
+            )
+        else:
+            selected_voice = voice
+
         fname = f"scenario-{scenario_id}-opt{opt_idx}-ex{ex_idx}.{fmt}"
         dest_path = output_dir / fname
         key = normalize_phrase(text, language)
@@ -282,7 +344,7 @@ def generate_for_scenarios(
                 key=key,
                 phrase=text,
                 output_dir=output_dir,
-                voice=voice,
+                voice=selected_voice,
                 fmt=fmt,
                 synthesizer=synth_func,
                 dry_run=dry_run,
@@ -296,7 +358,7 @@ def generate_for_scenarios(
             "clip_id": variant["variant_id"],
             "phrase_id": entry.get("phrase_id"),
             "file": variant["file"],
-            "voice": variant.get("voice", voice),
+            "voice": variant.get("voice", selected_voice),
             "format": variant.get("format", fmt),
         }
         processed_keys.add(fname)
@@ -305,7 +367,7 @@ def generate_for_scenarios(
             output_dir=output_dir,
             variant=variant,
             phrase=text,
-            voice=voice,
+            voice=selected_voice,
             fmt=fmt,
             synthesizer=synth_func,
             dry_run=dry_run,

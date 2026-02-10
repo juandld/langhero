@@ -1,11 +1,11 @@
 <script>
-  import ScenarioDisplay from '$lib/components/ScenarioDisplay.svelte';
+  import GameView from '$lib/components/game/GameView.svelte';
   import { storyStore } from '$lib/storyStore.js';
   import { getStreamMode } from '$lib/config';
   import { onMount } from 'svelte';
-  import DemoModeBanner from '$lib/components/DemoModeBanner.svelte';
 
   let streamMode = 'real';
+  let devPanelVisible = true;
 
   onMount(() => {
     streamMode = getStreamMode();
@@ -14,80 +14,152 @@
 
   const jumpTo = (id) => storyStore.goToScenario(id);
   const reset = () => storyStore.useBuiltInScenarios();
+  const toggleDevPanel = () => { devPanelVisible = !devPanelVisible; };
 </script>
 
-<main class="demo">
-  <h1>Scenario Mode Demo</h1>
-  <DemoModeBanner compact />
-  <p class="note">
-    Jump between a beginner (time-stop) and advanced (streaming) scenario to sanity-check the HUD + controls.
-  </p>
+<div class="demo-container">
+  <GameView />
 
-  <div class="controls">
-    <button type="button" on:click={() => jumpTo(1)}>Beginner (Scenario 1)</button>
-    <button type="button" on:click={() => jumpTo(4)}>Advanced (Scenario 4)</button>
-    <button type="button" class="secondary" on:click={reset}>Reset</button>
-  </div>
-
-  <div class="hint">
-    Stream mode: <code>{streamMode}</code> (set via <code>?stream=real|mock|off</code>) · Dev back button via
-    <code>?dev=1</code>
-  </div>
-
-  <ScenarioDisplay />
-</main>
+  {#if devPanelVisible}
+    <div class="dev-overlay">
+      <div class="dev-panel">
+        <button class="close-btn" on:click={toggleDevPanel} aria-label="Close dev panel">×</button>
+        <h2>Demo Controls</h2>
+        <p class="hint">Jump between beginner and advanced scenarios</p>
+        <div class="controls">
+          <button type="button" on:click={() => jumpTo(1)}>Beginner (1)</button>
+          <button type="button" on:click={() => jumpTo(4)}>Advanced (4)</button>
+          <button type="button" class="secondary" on:click={reset}>Reset</button>
+        </div>
+        <div class="stream-info">
+          Stream: <code>{streamMode}</code>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <button class="show-dev-btn" on:click={toggleDevPanel} aria-label="Show dev panel">
+      DEV
+    </button>
+  {/if}
+</div>
 
 <style>
-  .demo {
-    font-family: sans-serif;
-    max-width: 760px;
-    margin: 0 auto;
-    padding: 2rem 1.25rem;
+  .demo-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
   }
 
-  h1 {
-    margin: 0 0 0.5rem;
-    text-align: center;
+  .dev-overlay {
+    position: fixed;
+    top: 60px;
+    right: 16px;
+    z-index: 500;
   }
 
-  .note {
-    margin: 0 0 1rem;
-    text-align: center;
-    color: #6b7280;
+  .dev-panel {
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 16px;
+    min-width: 220px;
+    color: #e2e8f0;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+
+  .dev-panel h2 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #f8fafc;
+  }
+
+  .hint {
+    margin: 0 0 12px;
+    font-size: 0.8rem;
+    color: #94a3b8;
   }
 
   .controls {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    margin-bottom: 0.75rem;
+    flex-direction: column;
+    gap: 8px;
   }
 
   button {
-    background: #111827;
+    background: #6366f1;
     color: white;
     border: none;
     padding: 10px 14px;
     border-radius: 10px;
     cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: background 0.15s ease;
+  }
+
+  button:hover {
+    background: #4f46e5;
   }
 
   button.secondary {
-    background: #374151;
+    background: #475569;
   }
 
-  .hint {
-    margin: 0 auto 1.25rem;
-    max-width: 620px;
-    font-size: 0.9rem;
-    color: #374151;
+  button.secondary:hover {
+    background: #64748b;
+  }
+
+  .close-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 1.5rem;
+    padding: 4px 8px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .close-btn:hover {
+    color: #e2e8f0;
+    background: transparent;
+  }
+
+  .stream-info {
+    margin-top: 12px;
+    font-size: 0.8rem;
+    color: #94a3b8;
     text-align: center;
   }
 
   code {
-    background: #f3f4f6;
+    background: rgba(255, 255, 255, 0.1);
     padding: 2px 6px;
-    border-radius: 6px;
+    border-radius: 4px;
+    color: #a5b4fc;
+  }
+
+  .show-dev-btn {
+    position: fixed;
+    top: 60px;
+    right: 16px;
+    z-index: 500;
+    background: rgba(99, 102, 241, 0.8);
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+  }
+
+  .show-dev-btn:hover {
+    background: #6366f1;
   }
 </style>

@@ -189,18 +189,23 @@ def transcribe_audio(
         raise RuntimeError("No transcription providers configured.")
     instruction_text = instructions or "Transcribe this audio recording."
     mime = mime_type or _mime_from_ext(file_ext)
+    logger.info("[transcribe] context=%s order=%s bytes=%d lang_hint=%s", context, order, len(audio_bytes), language_hint)
     last_err: Optional[Exception] = None
     for provider_name in order:
         try:
             if provider_name == "gemini":
-                return _transcribe_with_gemini(audio_bytes, instruction_text, mime)
+                result = _transcribe_with_gemini(audio_bytes, instruction_text, mime)
+                logger.info("[transcribe] OK provider=gemini key=%s text=%r", result.meta.get("key_index"), (result.text or "")[:100])
+                return result
             if provider_name == "openai":
-                return _transcribe_with_openai_result(
+                result = _transcribe_with_openai_result(
                     audio_bytes,
                     file_ext=file_ext,
                     language=language_hint,
                     prompt=instruction_text if instruction_text else None,
                 )
+                logger.info("[transcribe] OK provider=openai text=%r", (result.text or "")[:100])
+                return result
             raise RuntimeError(f"Unsupported transcription provider '{provider_name}'")
         except Exception as exc:  # noqa: PERF203
             last_err = exc
@@ -226,7 +231,9 @@ def invoke_google(messages: List[HumanMessage], model: str | None = None) -> Tup
     for idx, llm in enumerate(llms):
         try:
             # Disable internal retries by overriding keyword
-            return llm.invoke(messages, max_retries=0), idx
+            resp = llm.invoke(messages, max_retries=0)
+            logger.info("[invoke_google] OK key_index=%d/%d", idx, len(llms))
+            return resp, idx
         except Exception as e:
             last_err = e
             logger.warning(
@@ -342,8 +349,17 @@ def transcribe_with_openai(
         "model": config.OPENAI_TRANSCRIBE_MODEL,
         "file": bio,
         "response_format": "text",
+        "temperature": 0,  # Max determinism — same audio should yield same text
     }
     hint = (language or "").strip()
+    # Map language names to ISO 639-1 codes for Whisper
+    _lang_to_iso = {
+        "japanese": "ja", "english": "en", "spanish": "es",
+        "ja": "ja", "en": "en", "es": "es",
+    }
+    iso_code = _lang_to_iso.get(hint.lower()) if hint else None
+    if iso_code:
+        kwargs["language"] = iso_code
     if prompt:
         kwargs["prompt"] = prompt
     elif hint:
@@ -355,10 +371,23 @@ def transcribe_with_openai(
     return resp if isinstance(resp, str) else getattr(resp, "text", "")
 
 
-def tts_with_openai(text: str, voice: str = "alloy", fmt: str = "mp3") -> bytes:
+def tts_with_openai(
+    text: str,
+    voice: str = "alloy",
+    fmt: str = "mp3",
+    instructions: str | None = None,
+) -> bytes:
     """Synthesize speech for a short phrase using OpenAI TTS.
 
-    Returns raw audio bytes. Caller is responsible for persisting to a file.
+    Args:
+        text: The text to synthesize
+        voice: Voice name (alloy, echo, fable, onyx, nova, shimmer)
+        fmt: Output format (mp3, wav, opus)
+        instructions: Optional instructions for expressive speech (gpt-4o-mini-tts)
+                     e.g., "Speak warmly and kindly" or "Speak with suspicion"
+
+    Returns:
+        Raw audio bytes. Caller is responsible for persisting to a file.
     """
     if not config.OPENAI_API_KEY:
         raise RuntimeError("OpenAI TTS not configured.")
@@ -366,15 +395,22 @@ def tts_with_openai(text: str, voice: str = "alloy", fmt: str = "mp3") -> bytes:
     client = OpenAI(api_key=config.OPENAI_API_KEY)
     # Prefer modern TTS model if available; fallback is handled via config
     model = config.OPENAI_TTS_MODEL
+
+    # Build request kwargs
+    kwargs = {
+        "model": model,
+        "voice": voice,
+        "input": text,
+    }
+
+    # Add instructions if provided (supported by gpt-4o-mini-tts and similar)
+    if instructions and "gpt-4o" in model:
+        kwargs["instructions"] = instructions
+
     # API accepts 'audio.speech.create' with input, voice, model
     # Some SDKs use 'format' or 'response_format'. We'll try 'format'.
     try:
-        resp = client.audio.speech.create(
-            model=model,
-            voice=voice,
-            input=text,
-            format=fmt,
-        )
+        resp = client.audio.speech.create(**kwargs, format=fmt)
         # Depending on SDK, resp could expose .read() or .content
         data = getattr(resp, "content", None)
         if data is None and hasattr(resp, "read"):
@@ -382,9 +418,9 @@ def tts_with_openai(text: str, voice: str = "alloy", fmt: str = "mp3") -> bytes:
         if isinstance(data, (bytes, bytearray)):
             return bytes(data)
     except Exception:
-        # Fallback older shape
+        # Fallback older shape (without format param)
         try:
-            resp = client.audio.speech.create(model=model, voice=voice, input=text)
+            resp = client.audio.speech.create(**kwargs)
             data = getattr(resp, "content", None)
             if isinstance(data, (bytes, bytearray)):
                 return bytes(data)

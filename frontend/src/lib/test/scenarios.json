@@ -2,8 +2,10 @@
   {
     "id": 1,
     "description": "The chef asks if you're hungry. How do you respond?",
+    "setting": "A cozy ramen stall in Tokyo at night",
     "character_dialogue_jp": "いらっしゃいませ！",
     "character_dialogue_en": "Welcome!",
+    "image_url": "https://images.unsplash.com/photo-1554502078-ef0fc409efce?w=800&q=80",
     "mode": "beginner",
     "lives": 3,
     "reward_points": 10,
@@ -49,8 +51,10 @@
   {
     "id": 2,
     "description": "The chef serves the ramen. How do you respond?",
+    "setting": "The chef presents a beautiful bowl of ramen",
     "character_dialogue_jp": "素晴らしい！当店自慢のラーメン一杯、お待ちどうさま！",
     "character_dialogue_en": "Excellent! One bowl of our finest ramen, coming up!",
+    "image_url": "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&q=80",
     "mode": "beginner",
     "lives": 3,
     "reward_points": 10,
@@ -68,8 +72,10 @@
   {
     "id": 3,
     "description": "You politely decline. The chef nods.",
+    "setting": "The chef bows politely as you prepare to leave",
     "character_dialogue_jp": "そうですか。またの機会にどうぞ。",
     "character_dialogue_en": "I see. Please come again.",
+    "image_url": "https://images.unsplash.com/photo-1551218808-94e220e084d2?w=800&q=80",
     "mode": "beginner",
     "lives": 3,
     "reward_points": 10,
@@ -85,8 +91,10 @@
   {
     "id": 4,
     "description": "You received the ramen and thanked the chef.",
+    "setting": "Steam rises from the perfect bowl of ramen before you",
     "character_dialogue_jp": "どうぞ召し上がれ！",
     "character_dialogue_en": "Please enjoy!",
+    "image_url": "https://images.unsplash.com/photo-1557872943-16a5ac26437e?w=800&q=80",
     "mode": "advanced",
     "lives": 2,
     "reward_points": 15,
@@ -104,8 +112,10 @@
   {
     "id": 5,
     "description": "You compliment the ramen.",
+    "setting": "The chef smiles warmly at your compliment",
     "character_dialogue_jp": "ありがとうございます！",
     "character_dialogue_en": "Thank you!",
+    "image_url": "https://images.unsplash.com/photo-1623341214825-9f4f963727da?w=800&q=80",
     "mode": "advanced",
     "lives": 2,
     "reward_points": 15,
@@ -123,8 +133,10 @@
   {
     "id": 6,
     "description": "You say goodbye and leave.",
+    "setting": "You bow and step out into the Tokyo night",
     "character_dialogue_jp": "またお待ちしています！",
     "character_dialogue_en": "Hope to see you again!",
+    "image_url": "https://images.unsplash.com/photo-1480796927426-f609979314bd?w=800&q=80",
     "mode": "advanced",
     "lives": 2,
     "reward_points": 15,
@@ -137,8 +149,10 @@
   {
     "id": 7,
     "description": "The chef responds to your request.",
+    "setting": "The chef prepares your request with care",
     "character_dialogue_jp": "かしこまりました。少々お待ちください。",
     "character_dialogue_en": "Certainly. One moment, please.",
+    "image_url": "https://images.unsplash.com/photo-1617093727343-374698b1b08d?w=800&q=80",
     "mode": "advanced",
     "lives": 2,
     "reward_points": 15,
@@ -154,14 +168,407 @@
   {
     "id": 8,
     "description": "You pay and finish the meal.",
+    "setting": "A satisfying end to a delicious meal",
     "character_dialogue_jp": "ありがとうございました！",
     "character_dialogue_en": "Thank you very much!",
+    "image_url": "https://images.unsplash.com/photo-1555126634-323283e090fa?w=800&q=80",
     "mode": "advanced",
     "lives": 2,
     "reward_points": 15,
     "penalties": {
       "incorrect_answer": { "lives": 1 },
       "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": []
+  },
+
+  {
+    "id": 100,
+    "story_id": "shogun",
+    "chapter_id": "ch1",
+    "setting": "Stormy beach at night, shipwreck debris scattered",
+    "description": "You wake on a foreign shore. A samurai demands to know who you are.",
+    "character_dialogue_jp": "何者だ！答えろ！",
+    "character_dialogue_en": "Who are you! Answer me!",
+    "image_url": "https://images.unsplash.com/photo-1534274988757-a28bf1a57c17?w=1200&q=80",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": [
+      {
+        "text": "Identify yourself",
+        "style": "polite",
+        "next_scenario": 101,
+        "keywords": ["私は", "わたしは", "です"],
+        "examples": [
+          {"native": "I am... a traveler.", "target": "私は...旅人です。", "pronunciation": "Watashi wa... tabibito desu."}
+        ]
+      },
+      {
+        "text": "Plead for mercy",
+        "style": "humble",
+        "next_scenario": 102,
+        "keywords": ["お願い", "助けて", "命"],
+        "examples": [
+          {"native": "Please... spare my life.", "target": "お願いします...命だけは。", "pronunciation": "Onegaishimasu... inochi dake wa."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 101,
+    "story_id": "shogun",
+    "chapter_id": "ch1",
+    "setting": "Beach with samurai lowering sword slightly",
+    "description": "The samurai's eyes narrow. He's considering your words.",
+    "character_dialogue_jp": "旅人だと？どこから来た？",
+    "character_dialogue_en": "A traveler, you say? Where do you come from?",
+    "image_url": "https://images.unsplash.com/photo-1590794056226-79ef3a8147e1?w=1200&q=80",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": [
+      {
+        "text": "From a faraway land",
+        "style": "honest",
+        "next_scenario": 103,
+        "keywords": ["遠い", "国", "から"],
+        "examples": [
+          {"native": "From a faraway land.", "target": "遠い国から来ました。", "pronunciation": "Tooi kuni kara kimashita."}
+        ]
+      },
+      {
+        "text": "Point to the shipwreck",
+        "style": "direct",
+        "next_scenario": 103,
+        "keywords": ["船", "あの", "あそこ"],
+        "examples": [
+          {"native": "That ship... was mine.", "target": "あの船...私のです。", "pronunciation": "Ano fune... watashi no desu."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 102,
+    "story_id": "shogun",
+    "chapter_id": "ch1",
+    "setting": "Samurai looking down with sword still raised",
+    "description": "The samurai pauses. Mercy is rare in these times.",
+    "character_dialogue_jp": "命乞いか...情けない。だが...",
+    "character_dialogue_en": "Begging for your life... Pathetic. But...",
+    "image_url": "https://images.unsplash.com/photo-1555169062-013468b47731?w=1200&q=80",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": [
+      {
+        "text": "Show respect",
+        "style": "humble",
+        "next_scenario": 103,
+        "keywords": ["すみません", "ごめんなさい", "申し訳"],
+        "examples": [
+          {"native": "I meant no disrespect.", "target": "失礼しました。", "pronunciation": "Shitsurei shimashita."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 103,
+    "story_id": "shogun",
+    "chapter_id": "ch1",
+    "setting": "First light of dawn on the beach, samurai sheathing sword",
+    "description": "The samurai sheathes his sword. You will live - for now.",
+    "character_dialogue_jp": "ついて来い。殿様が会いたがっている。",
+    "character_dialogue_en": "Come with me. The lord wishes to see you.",
+    "image_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1200&q=80",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 20,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": [
+      {
+        "text": "Follow obediently",
+        "style": "humble",
+        "next_scenario": 104,
+        "keywords": ["はい", "分かりました", "わかりました"],
+        "examples": [
+          {"native": "Yes, I understand.", "target": "はい、分かりました。", "pronunciation": "Hai, wakarimashita."}
+        ]
+      },
+      {
+        "text": "Ask where you're going",
+        "style": "curious",
+        "next_scenario": 104,
+        "keywords": ["どこ", "行く", "どちら"],
+        "examples": [
+          {"native": "Where are we going?", "target": "どこへ行くのですか？", "pronunciation": "Doko e iku no desu ka?"}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 104,
+    "story_id": "shogun",
+    "chapter_id": "ch2",
+    "setting": "Walking through a traditional Japanese village",
+    "description": "You are led through a fishing village. The villagers stare.",
+    "character_dialogue_jp": "見たことない顔だな...外国人か？",
+    "character_dialogue_en": "Never seen a face like that... A foreigner?",
+    "image_url": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1200&q=80",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": [
+      {
+        "text": "Greet the villagers",
+        "style": "friendly",
+        "next_scenario": 105,
+        "keywords": ["こんにちは", "よろしく"],
+        "examples": [
+          {"native": "Hello.", "target": "こんにちは。", "pronunciation": "Konnichiwa."}
+        ]
+      },
+      {
+        "text": "Keep your head down",
+        "style": "cautious",
+        "next_scenario": 105,
+        "keywords": ["すみません", "通ります"],
+        "examples": [
+          {"native": "Excuse me.", "target": "すみません。", "pronunciation": "Sumimasen."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 105,
+    "story_id": "shogun",
+    "chapter_id": "ch2",
+    "setting": "Village elder's house, simple but dignified",
+    "description": "An elderly woman offers you rice and water.",
+    "character_dialogue_jp": "お腹がすいているでしょう。どうぞ。",
+    "character_dialogue_en": "You must be hungry. Please, eat.",
+    "image_url": "https://images.unsplash.com/photo-1551218808-94e220e084d2?w=1200&q=80",
+    "mode": "beginner",
+    "lives": 3,
+    "reward_points": 15,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 15 }
+    },
+    "options": [
+      {
+        "text": "Thank her gratefully",
+        "style": "polite",
+        "next_scenario": 106,
+        "keywords": ["ありがとう", "ございます", "いただきます"],
+        "examples": [
+          {"native": "Thank you very much.", "target": "ありがとうございます。", "pronunciation": "Arigatou gozaimasu."},
+          {"native": "I gratefully receive.", "target": "いただきます。", "pronunciation": "Itadakimasu."}
+        ]
+      },
+      {
+        "text": "Ask her name",
+        "style": "friendly",
+        "next_scenario": 106,
+        "keywords": ["名前", "お名前", "何という"],
+        "examples": [
+          {"native": "What is your name?", "target": "お名前は何ですか？", "pronunciation": "Onamae wa nan desu ka?"}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 106,
+    "story_id": "shogun",
+    "chapter_id": "ch2",
+    "setting": "Inside the elder's house, warm firelight",
+    "description": "The woman smiles kindly. The samurai waits at the door.",
+    "character_dialogue_jp": "私は里の長です。あなたは珍しいお客様ですね。",
+    "character_dialogue_en": "I am the village elder. You are an unusual guest.",
+    "image_url": "https://images.unsplash.com/photo-1617093727343-374698b1b08d?w=1200&q=80",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 20,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 20 }
+    },
+    "options": [
+      {
+        "text": "Express gratitude for the kindness",
+        "style": "humble",
+        "next_scenario": 107,
+        "keywords": ["ありがとう", "親切", "感謝"],
+        "examples": [
+          {"native": "Your kindness is appreciated.", "target": "ご親切にありがとうございます。", "pronunciation": "Goshinsetsu ni arigatou gozaimasu."}
+        ]
+      },
+      {
+        "text": "Ask about the lord",
+        "style": "curious",
+        "next_scenario": 107,
+        "keywords": ["殿様", "どんな", "どういう"],
+        "examples": [
+          {"native": "What is the lord like?", "target": "殿様はどんな方ですか？", "pronunciation": "Tonosama wa donna kata desu ka?"}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 107,
+    "story_id": "shogun",
+    "chapter_id": "ch2",
+    "setting": "Looking out at a castle on a distant hill",
+    "description": "The elder's expression becomes serious.",
+    "character_dialogue_jp": "殿様は...厳しい方です。気をつけなさい。",
+    "character_dialogue_en": "The lord is... a strict man. Be careful.",
+    "image_url": "https://images.unsplash.com/photo-1480796927426-f609979314bd?w=1200&q=80",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 20,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 20 }
+    },
+    "options": [
+      {
+        "text": "Thank her for the warning",
+        "style": "polite",
+        "next_scenario": 108,
+        "keywords": ["ありがとう", "気をつけ", "わかりました"],
+        "examples": [
+          {"native": "I understand. Thank you.", "target": "分かりました。ありがとうございます。", "pronunciation": "Wakarimashita. Arigatou gozaimasu."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 108,
+    "story_id": "shogun",
+    "chapter_id": "ch3",
+    "setting": "Grand castle gates, imposing and intimidating",
+    "description": "The castle looms above you. Guards stand at attention.",
+    "character_dialogue_jp": "止まれ！何用だ！",
+    "character_dialogue_en": "Halt! State your business!",
+    "image_url": "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=1200&q=80",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 25,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 25 }
+    },
+    "options": [
+      {
+        "text": "The samurai explains",
+        "style": "silent",
+        "next_scenario": 109,
+        "keywords": [],
+        "examples": [
+          {"native": "(Let the samurai speak)", "target": "（侍に任せる）", "pronunciation": "(Samurai ni makaseru)"}
+        ]
+      },
+      {
+        "text": "Bow respectfully",
+        "style": "humble",
+        "next_scenario": 109,
+        "keywords": ["失礼", "お邪魔", "参りました"],
+        "examples": [
+          {"native": "I have come to see the lord.", "target": "殿様にお目にかかりに参りました。", "pronunciation": "Tonosama ni ome ni kakari ni mairimashita."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 109,
+    "story_id": "shogun",
+    "chapter_id": "ch3",
+    "setting": "Inside the castle, walking through corridors",
+    "description": "You are led through elegant but austere corridors.",
+    "character_dialogue_jp": "殿様の前では頭を下げろ。目を合わせるな。",
+    "character_dialogue_en": "Bow before the lord. Do not make eye contact.",
+    "image_url": "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=1200&q=80",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 20,
+    "penalties": {
+      "incorrect_answer": { "lives": 1 },
+      "language_mismatch": { "lives": 2, "points": 20 }
+    },
+    "options": [
+      {
+        "text": "Acknowledge the instruction",
+        "style": "obedient",
+        "next_scenario": 110,
+        "keywords": ["はい", "分かりました", "承知"],
+        "examples": [
+          {"native": "Understood.", "target": "承知しました。", "pronunciation": "Shouchi shimashita."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 110,
+    "story_id": "shogun",
+    "chapter_id": "ch3",
+    "setting": "Throne room, lord seated in traditional attire",
+    "description": "The lord studies you with cold, calculating eyes.",
+    "character_dialogue_jp": "お前が海から来た異人か。名を名乗れ。",
+    "character_dialogue_en": "So you are the stranger from the sea. State your name.",
+    "image_url": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&q=80",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 30,
+    "penalties": {
+      "incorrect_answer": { "lives": 2 },
+      "language_mismatch": { "lives": 2, "points": 30 }
+    },
+    "options": [
+      {
+        "text": "Give your name respectfully",
+        "style": "humble",
+        "next_scenario": 111,
+        "keywords": ["私は", "申します", "と言います"],
+        "examples": [
+          {"native": "My name is...", "target": "私は...と申します。", "pronunciation": "Watashi wa... to moushimasu."}
+        ]
+      }
+    ]
+  },
+  {
+    "id": 111,
+    "story_id": "shogun",
+    "chapter_id": "ch3",
+    "setting": "Lord's face showing slight interest",
+    "description": "The lord leans forward. Your fate hangs in the balance.",
+    "character_dialogue_jp": "お前は何ができる？役に立つなら生かしてやる。",
+    "character_dialogue_en": "What can you do? If you are useful, I may let you live.",
+    "image_url": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1200&q=80",
+    "mode": "advanced",
+    "lives": 2,
+    "reward_points": 35,
+    "penalties": {
+      "incorrect_answer": { "lives": 2 },
+      "language_mismatch": { "lives": 2, "points": 35 }
     },
     "options": []
   }

@@ -81,6 +81,22 @@ This is the recommended way to run the project.
     # TRANSCRIBE_TRANSLATE_PROVIDER="auto"
     # TRANSCRIBE_IMITATE_PROVIDER="openai,gemini"
     # TRANSCRIBE_NOTES_PROVIDER="gemini,openai"
+
+    # Appwrite auth (magic link)
+    # APPWRITE_ENDPOINT="https://cloud.appwrite.io/v1"
+    # APPWRITE_PROJECT_ID="your-appwrite-project-id"
+    # REQUIRE_AUTH_FOR_IMPORT="false"
+    # REQUIRE_AUTH_FOR_PUBLISH="false"
+    # REQUIRE_AUTH_FOR_STREAM="false"
+    ```
+
+Optional (frontend magic-link login):
+Create `frontend/.env` with:
+    ```ini
+    PUBLIC_APPWRITE_ENDPOINT="https://cloud.appwrite.io/v1"
+    PUBLIC_APPWRITE_PROJECT_ID="your-appwrite-project-id"
+    # Optional: override redirect URL used in the magic link email
+    # PUBLIC_APPWRITE_MAGIC_LINK_URL="https://app.example.com/login"
     ```
 
 3.  **Build and run the application with Docker Compose:**

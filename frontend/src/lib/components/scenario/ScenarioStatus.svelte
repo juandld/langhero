@@ -1,4 +1,6 @@
 <script>
+  import { displayTitle, rankProgress } from '$lib/profileStore';
+
   export let lives = 0;
   export let livesTotal = 0;
   export let score = 0;
@@ -12,12 +14,17 @@
   $: confValue = Number(confidence);
   $: hasConfidence = Number.isFinite(confValue);
   $: confPct = hasConfidence ? Math.round(Math.max(0, Math.min(1, confValue)) * 100) : null;
+  $: title = $displayTitle;
+  $: progress = $rankProgress;
 </script>
 
 <div class="status-strip">
   <div class="mode-pill" data-mode={normalizedMode}>{modeLabel}</div>
   <div class="status-item">Lives: {lives}/{livesTotal}</div>
-  <div class="status-item">Score: {score}</div>
+  <div class="status-item rank-badge" title="Progress to next rank: {progress}%">
+    <span class="rank-icon">🎭</span>
+    <span class="rank-text">{title}</span>
+  </div>
   {#if hasConfidence}
     <div class="status-item confidence" title={matchType ? `match: ${matchType}` : 'match confidence'}>
       <span>Confidence: {confPct}%</span>
@@ -49,6 +56,23 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .status-item.rank-badge {
+    background: linear-gradient(135deg, #f3e8ff, #e9d5ff);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+    color: #6b21a8;
+    gap: 6px;
+  }
+
+  .rank-icon {
+    font-size: 0.95rem;
+    line-height: 1;
+  }
+
+  .rank-text {
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 
   .confidence .bar {

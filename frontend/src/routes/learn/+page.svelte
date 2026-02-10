@@ -1,25 +1,15 @@
 <script>
-  import ScenarioDisplay from '$lib/components/ScenarioDisplay.svelte';
+  import GameView from '$lib/components/game/GameView.svelte';
+  import { storyStore } from '$lib/storyStore.js';
+  import { onMount } from 'svelte';
+
+  onMount(() => {
+    storyStore.useBuiltInScenarios();
+  });
 </script>
 
 <svelte:head>
   <title>Learn - LangHero</title>
 </svelte:head>
 
-<div class="learn-page-container">
-  <h1>A Moment in Tokyo</h1>
-  <ScenarioDisplay />
-</div>
-
-<style>
-  .learn-page-container {
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  h1 {
-    margin-bottom: 20px;
-    color: #333;
-  }
-</style>
+<GameView />

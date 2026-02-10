@@ -1,5 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { normalizeLanguage, clamp01 } from '$lib/utils';
 
   export let requireRepeat = false;
   export let selectedOption = null;
@@ -44,12 +45,6 @@
     ? 'Translates while time is frozen — no lives at risk.'
     : 'Translates without costing lives even while the live mic is active.';
 
-  const clamp01 = (v) => {
-    const num = Number(v);
-    if (!Number.isFinite(num)) return 0;
-    return Math.min(1, Math.max(0, num));
-  };
-
   const handleJudgeInput = (event) => {
     judgeFocus = clamp01(event?.currentTarget?.value);
   };
@@ -59,17 +54,6 @@
   $: judgeHint = judgeFocus >= 0.66
     ? 'More permissive: prioritize story progression.'
     : (judgeFocus <= 0.34 ? 'Stricter: prioritize target-language performance.' : 'Balanced: mix learning and story goals.');
-
-  const normalizeLanguage = (v) => {
-    const raw = String(v || '').trim();
-    if (!raw) return '';
-    const lowered = raw.toLowerCase();
-    if (['auto', 'default', 'none'].includes(lowered)) return '';
-    if (['ja', 'jp', 'japanese'].includes(lowered)) return 'Japanese';
-    if (['en', 'eng', 'english'].includes(lowered)) return 'English';
-    if (['es', 'spa', 'spanish', 'espanol', 'español'].includes(lowered)) return 'Spanish';
-    return raw;
-  };
 
   const handleLanguageChange = (event) => {
     languageOverride = normalizeLanguage(event?.currentTarget?.value);

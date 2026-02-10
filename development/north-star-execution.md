@@ -4,11 +4,16 @@ This doc turns the north star into an executable MVP path: **import a story → 
 
 ## North Star (current)
 
-- **Player**: isolated, regret-prone learner who needs a “game excuse” to practice speaking.
+- **Player**: isolated, regret-prone learner who needs a "game excuse" to practice speaking.
 - **Promise**: words are the primary mechanic; dialogue is how you survive, escape, negotiate, and set boundaries.
-- **Shape**: “BG3 with voice” (freeform speech) with two loops:
-  - **Beginner (time-stop)**: repeat/translate/rehearse safely, then commit with mic.
+- **Shape**: "BG3 with voice" (freeform speech) with two loops:
+  - **Beginner (time-stop)**: rehearse safely with suggestions and Bimbo translations, then commit with mic. Options are **suggestions, not required answers** — the player can say anything.
   - **Advanced (streaming)**: speak live under pressure; system responds in real time.
+- **Core principles**:
+  - **No "expected" answers**: Option cards are helpful suggestions to guide the learner. The player is free to say whatever they want — including creative, off-script responses via Bimbo.
+  - **Lives are narrative, not pronunciation**: A life is lost when the player's words cause characters to kill them or place them in a fatal situation. Speech recognition quality (match score, pronunciation accuracy) never costs a life. The story decides consequences, not the speech engine.
+  - **Response categories over match scores**: After speaking, the player sees how their words landed (Diplomatic, Pragmatic, Bold, Hostile, History-Breaking) — not a pronunciation grade. This connects speech to narrative impact.
+  - **Reflection over speed**: After speaking, the player gets a Continue button to read the result and understand what happened. No auto-advance.
 - **Knobs**:
   - **Judge focus** slider: learning-first ↔ story-first.
   - **Language**: inferred from setting; user can override.
@@ -66,10 +71,16 @@ Goal: player can say anything, but the world reacts through a stable intent laye
 - Convert speech → structured intent:
   - intent label (aligned to the scene goal)
   - confidence
-  - tone (polite/hostile/neutral) and “in-character” score
-- Map intent to outcome:
+  - response category (Diplomatic / Pragmatic / Bold / Hostile / History-Breaking)
+- Map intent to narrative outcome:
   - advance / retry / branch / stall
-  - apply scoreDelta/livesDelta and a short feedback string
+  - apply scoreDelta and narrative feedback
+  - **livesDelta only from narrative events** (character kills the player, player falls into danger, etc.) — never from speech quality
+- **Ask Bimbo** (creative expression):
+  - Player types what they want to say in English → single LLM call translates to Japanese + gives a funny in-character remark + optionally matches to an existing option
+  - Backend returns translation + `providers.romanize()` for reliable romaji
+  - Frontend shows pronunciation card (Japanese + romaji + English) with tap-to-hear
+  - Speech recognition result shows how the response landed (category), not how it matched panel options
 - Keep judge slider meaningful:
   - learning-first: stricter language + clearer coaching
   - story-first: more permissive advancement, fewer language gates
@@ -99,6 +110,22 @@ For each archetype:
 - define 3–5 canonical intents
 - define escalation/resolution rules
 - add scenario tags so import/compiler can choose patterns
+
+### M4.1 — History-Breaking Responses
+
+**History-Breaking** is a special response category where the player says something so insightful and relatable to the characters in the scene that it changes the course of events — creating a story branch that wouldn't otherwise exist.
+
+This cultivates **discernment**: the player must deeply understand the situation, the characters' motivations, and the cultural context to unlock these moments. It's not about knowing more words — it's about knowing the *right* words.
+
+**Implementation path:**
+- v0 (now): Story authors manually tag specific options as `style: "insightful"` to create hand-crafted history-breaking moments
+- v1 (future): AI evaluates freeform speech for insight — does the player's response demonstrate understanding of the scene's emotional/cultural dynamics?
+- v2 (future): AI generates new story branches on the fly when a history-breaking response is detected
+
+**Design constraints:**
+- History-Breaking should be rare (1-2 per story arc) to feel special
+- Must be achievable at the player's language level — insight, not vocabulary, is the gate
+- The branched content should feel meaningfully different, not cosmetic
 
 ### M5 — Import Expansion (authorized sources)
 

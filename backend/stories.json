@@ -1,0 +1,390 @@
+{
+  "stories": [
+    {
+      "id": "shogun",
+      "title": "The Shogun's Path",
+      "language": "Japanese",
+      "description": "1600 Japan. Shipwrecked. Survive.",
+      "cover_image": "https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=800&q=80",
+
+      "tutorial": {
+        "intro_dialogue": "tutorial_intro",
+        "scenarios": [1, 2, 3, 4, 5],
+        "min_complete": 2,
+        "transition_dialogue": "tutorial_to_story",
+        "aesthetic": "holographic"
+      },
+
+      "main": {
+        "intro_dialogue": "shogun_intro",
+        "drop_sequence": "shogun_drop",
+        "awakening_dialogue": "awakening",
+        "time_freeze_lesson": "time_freeze_lesson",
+        "first_success": "first_success",
+        "first_scenario_id": 100,
+        "aesthetic": "cinematic",
+        "chapters": [
+          {
+            "id": "ch1",
+            "title": "Shipwreck",
+            "description": "Washed ashore in a foreign land",
+            "scenarios": [100, 101, 102, 103]
+          },
+          {
+            "id": "ch2",
+            "title": "The Village",
+            "description": "Finding shelter among strangers",
+            "scenarios": [104, 105, 106, 107]
+          },
+          {
+            "id": "ch3",
+            "title": "The Lord's Court",
+            "description": "Summoned before power",
+            "scenarios": [108, 109, 110, 111]
+          }
+        ]
+      },
+
+      "panel_assignments": {
+        "tutorial_intro": {
+          "0": "bimbo_orb_excited",
+          "1": "ship_interior",
+          "2": "bimbo_orb_explaining",
+          "3": "simulation_loading",
+          "4": "ramen_holo_wide",
+          "5": "bimbo_orb_explaining",
+          "6": "bimbo_orb_excited"
+        },
+        "tutorial_to_story": {
+          "0": "ramen_holo",
+          "1": "simulation_glitch",
+          "2": "bimbo_orb_explaining",
+          "3": "simulation_glitch",
+          "4": "bimbo_orb_concerned",
+          "5": "bimbo_orb_concerned",
+          "6": "ship_viewport"
+        },
+        "shogun_intro": {
+          "0": "ship_viewport",
+          "1": "hologram_japan_map",
+          "2": "hologram_sengoku",
+          "3": "hologram_samurai",
+          "4": "bimbo_orb_concerned",
+          "5": "hologram_samurai",
+          "6": "bimbo_orb_concerned"
+        },
+        "shogun_drop": {
+          "0": "drop_flash",
+          "1": "time_vortex"
+        },
+        "awakening": {
+          "0": "beach_wakeup",
+          "1": "beach_storm",
+          "2": "rough_hands",
+          "3": "samurai_face",
+          "4": "bimbo_orb_battlefield",
+          "5": "blade_draw",
+          "6": "blade_threat",
+          "7": "bimbo_orb_battlefield"
+        },
+        "time_freeze_lesson": {
+          "0": "time_frozen",
+          "1": "time_frozen_blade",
+          "2": "bimbo_orb_battlefield",
+          "3": "bimbo_orb_battlefield"
+        },
+        "first_success": {
+          "0": "samurai_surprised",
+          "1": "samurai_full",
+          "2": "bimbo_orb_battlefield",
+          "3": "beach_dawn"
+        }
+      }
+    }
+  ],
+
+  "dialogues": {
+    "tutorial_intro": [
+      { "speaker": "bimbo", "text": "Hey! Hey! Time for your daily lesson!", "sentiment": "excited" },
+      { "speaker": "bimbo", "text": "I know, I know - you're busy. But trust me, just a few minutes a day and you'll be speaking like a local in no time!", "sentiment": "encouraging" },
+      { "speaker": "bimbo", "text": "We'll start with something safe. A simulation - predictable conversations, no pressure.", "sentiment": "warm" },
+      { "speaker": "bimbo", "text": "I'll put you in a cozy ramen shop. Simple stuff - ordering food, being polite.", "sentiment": "friendly" },
+      { "speaker": "bimbo", "text": "Oh! And don't worry - I can freeze time whenever you need to think. Pretty cool, right?", "sentiment": "excited" },
+      { "speaker": "bimbo", "text": "Just focus on the sounds, the rhythm. You've got this!", "sentiment": "encouraging" },
+      { "speaker": "bimbo", "text": "Ready to begin?", "sentiment": "warm" }
+    ],
+
+    "tutorial_to_story": [
+      { "speaker": "bimbo", "text": "See? You're getting it. The textbook way works." },
+      { "speaker": "player", "text": "This feels... artificial. Like a simulation." },
+      { "speaker": "bimbo", "text": "Because it is. That's how everyone learns now." },
+      { "speaker": "player", "text": "I want the real thing. Put me somewhere I can't just restart." },
+      { "speaker": "bimbo", "text": "..." },
+      { "speaker": "bimbo", "text": "You sure about that? I have something. But it's not safe." },
+      { "speaker": "player", "text": "Do it." }
+    ],
+
+    "shogun_intro": [
+      { "speaker": "bimbo", "text": "Alright. You asked for it." },
+      { "speaker": "bimbo", "text": "Japan. 1600. The Sengoku period." },
+      { "speaker": "bimbo", "text": "Warlords fighting for control. Samurai who kill first and ask questions never." },
+      { "speaker": "bimbo", "text": "You'll be an Englishman. Shipwrecked on a foreign shore. No Japanese, no allies, no idea what's happening." },
+      { "speaker": "bimbo", "text": "I can still freeze time for you - that's my gift. But when time flows... you're on your own." },
+      { "speaker": "bimbo", "text": "One wrong word could mean your head." },
+      { "speaker": "bimbo", "text": "Ready?" }
+    ],
+
+    "shogun_drop": [
+      { "speaker": "bimbo", "text": "Dropping you in." },
+      { "speaker": "bimbo", "text": "Good luck." }
+    ],
+
+    "awakening": [
+      { "speaker": "narration", "text": "Your eyes open. Salt water. Splinters. Chaos." },
+      { "speaker": "narration", "text": "The storm has passed. You're alive - barely." },
+      { "speaker": "narration", "text": "Rough hands grab you. Drag you to your feet." },
+      { "speaker": "samurai", "text": "「何者だ！」", "sub": "???" },
+      { "speaker": "bimbo", "text": "Steady. He's asking who you are." },
+      { "speaker": "narration", "text": "A blade gleams in the torchlight." },
+      { "speaker": "samurai", "text": "「答えろ！」", "sub": "???" },
+      { "speaker": "bimbo", "text": "Time to freeze. Let me help you." }
+    ],
+
+    "time_freeze_lesson": [
+      { "speaker": "bimbo", "text": "There. Bought you some time. Literally." },
+      { "speaker": "bimbo", "text": "He wants to know who you are. Wrong answer and that blade finds your neck." },
+      { "speaker": "bimbo", "text": "Say: 「私は...」 - 'Watashi wa' - 'I am...'" },
+      { "speaker": "bimbo", "text": "Tap the phrase. Listen. Then say it back to me." }
+    ],
+
+    "first_success": [
+      { "speaker": "narration", "text": "The samurai's eyes widen. The blade lowers - slightly." },
+      { "speaker": "samurai", "text": "「...外国人か」", "sub": "A foreigner...?" },
+      { "speaker": "bimbo", "text": "You're alive. And your Japanese? Not bad for a first try." },
+      { "speaker": "bimbo", "text": "Welcome to Japan. The hard part starts now." }
+    ]
+  },
+
+  "panels": {
+    "holographic": {
+      "ship_interior": {
+        "id": "ship_interior",
+        "scene_description": "Sleek futuristic spaceship interior, deep blue ambient lighting, holographic displays floating in air, viewport showing distant nebula and stars, clean minimalist surfaces with neon edge lighting",
+        "mood": "peaceful",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&q=80"
+      },
+      "ship_viewport": {
+        "id": "ship_viewport",
+        "scene_description": "Wide cinematic view through massive spaceship window, galaxy and stars beyond, subtle grid pattern overlay at edges, neon purple and cyan accent lighting reflecting on glass",
+        "mood": "mysterious",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=1200&q=80"
+      },
+      "bimbo_orb_excited": {
+        "id": "bimbo_orb_excited",
+        "scene_description": "Glowing AI companion orb floating in dark space, vibrant purple and violet core with cyan particle trails, pulsing with excited energy, friendly warm glow emanating outward",
+        "mood": "warm",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=1200&q=80"
+      },
+      "bimbo_orb_explaining": {
+        "id": "bimbo_orb_explaining",
+        "scene_description": "AI orb companion projecting holographic tutorial elements, soft purple glow, data streams and symbols floating around it, patient teacher presence",
+        "mood": "peaceful",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&q=80"
+      },
+      "bimbo_orb_concerned": {
+        "id": "bimbo_orb_concerned",
+        "scene_description": "AI orb companion with dimmer glow, slight flicker, worried energy pattern, purple core with unstable edges, hesitant body language",
+        "mood": "tense",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1557682224-5b8590cd9ec5?w=1200&q=80"
+      },
+      "simulation_loading": {
+        "id": "simulation_loading",
+        "scene_description": "Holographic environment materializing, grid lines forming into shapes, neon blue wireframe becoming solid, digital particles coalescing into reality",
+        "mood": "mysterious",
+        "effects": ["particles", "radial_zoom"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=80"
+      },
+      "ramen_holo": {
+        "id": "ramen_holo",
+        "scene_description": "Cozy ramen stall rendered in holographic style, warm lantern glow with subtle scan-lines, steam rising with particle effects, slight transparency revealing grid beneath, safe simulation feel",
+        "mood": "warm",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1554502078-ef0fc409efce?w=1200&q=80"
+      },
+      "ramen_holo_wide": {
+        "id": "ramen_holo_wide",
+        "scene_description": "Wide shot of holographic Tokyo street at night, neon signs with digital shimmer, pedestrians with slight transparency, cozy ramen stalls lining the alley, simulation aesthetic",
+        "mood": "warm",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1480796927426-f609979314bd?w=1200&q=80"
+      },
+      "hologram_japan_map": {
+        "id": "hologram_japan_map",
+        "scene_description": "Massive holographic projection of feudal Japan map, glowing territorial boundaries, castle icons pulsing, samurai silhouettes moving like chess pieces, purple and gold color scheme",
+        "mood": "dramatic",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=1200&q=80"
+      },
+      "hologram_samurai": {
+        "id": "hologram_samurai",
+        "scene_description": "Holographic projection of fierce samurai warrior, translucent blue figure with glowing edges, katana raised, intensity visible despite digital form, historical footage playback feel",
+        "mood": "tense",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1590794056226-79ef3a8147e1?w=1200&q=80"
+      },
+      "hologram_sengoku": {
+        "id": "hologram_sengoku",
+        "scene_description": "Holographic battle scene from Sengoku period, armies clashing in blue-purple projection, castles burning, chaos and warfare rendered in clean digital lines",
+        "mood": "dramatic",
+        "effects": ["particles", "speed_lines"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1200&q=80"
+      },
+      "simulation_glitch": {
+        "id": "simulation_glitch",
+        "scene_description": "Holographic environment destabilizing, glitch artifacts, scan-lines intensifying, colors fragmenting, reality breaking apart into data streams",
+        "mood": "tense",
+        "effects": ["particles"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=1200&q=80"
+      },
+      "time_vortex": {
+        "id": "time_vortex",
+        "scene_description": "Swirling temporal vortex, purple and cyan energy spiraling inward, clock fragments and Japanese characters floating in the stream, disorienting descent into the past",
+        "mood": "dramatic",
+        "effects": ["radial_zoom", "particles", "speed_lines"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=1200&q=80"
+      },
+      "drop_flash": {
+        "id": "drop_flash",
+        "scene_description": "Blinding white flash transitioning to temporal energy, last glimpse of ship interior dissolving, overwhelming light consuming everything",
+        "mood": "dramatic",
+        "effects": ["impact_burst"],
+        "art_style": "manhwa",
+        "image_url": "https://images.unsplash.com/photo-1507400492013-162706c8c05e?w=1200&q=80"
+      }
+    },
+    "cinematic": {
+      "beach_storm": {
+        "id": "beach_storm",
+        "scene_description": "Stormy beach at night, shipwreck debris scattered on dark sand, rain lashing down, crashing waves illuminated by lightning, desperate survival atmosphere",
+        "mood": "tense",
+        "effects": ["rain", "vignette"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1534274988757-a28bf1a57c17?w=1200&q=80"
+      },
+      "beach_wakeup": {
+        "id": "beach_wakeup",
+        "scene_description": "POV shot opening eyes on beach, blurred vision clearing, salt water and splinters visible, rough sand beneath, disoriented first-person perspective",
+        "mood": "tense",
+        "effects": ["vignette"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1505142468610-359e7d316be0?w=1200&q=80"
+      },
+      "rough_hands": {
+        "id": "rough_hands",
+        "scene_description": "Close-up of rough calloused hands grabbing wet clothing, torchlight flickering on weathered skin, aggressive grip pulling upward",
+        "mood": "tense",
+        "effects": ["vignette"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1527525443983-6e60c75fff46?w=1200&q=80"
+      },
+      "samurai_face": {
+        "id": "samurai_face",
+        "scene_description": "Samurai face extreme close-up, rain-soaked topknot, suspicious narrowed eyes, torchlight casting harsh shadows, interrogating stare",
+        "mood": "tense",
+        "effects": ["rain", "vignette"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1590794056226-79ef3a8147e1?w=1200&q=80"
+      },
+      "samurai_full": {
+        "id": "samurai_full",
+        "scene_description": "Full body shot of samurai warrior on stormy beach, traditional armor gleaming wet, hand on katana hilt, imposing silhouette against lightning sky",
+        "mood": "dramatic",
+        "effects": ["rain"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1200&q=80"
+      },
+      "blade_threat": {
+        "id": "blade_threat",
+        "scene_description": "Katana blade extreme close-up pointed at viewer, razor edge gleaming in torchlight, rain drops on steel, life-or-death tension",
+        "mood": "dramatic",
+        "effects": ["impact_burst", "vignette"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1555169062-013468b47731?w=1200&q=80"
+      },
+      "blade_draw": {
+        "id": "blade_draw",
+        "scene_description": "Dynamic shot of katana being drawn from scabbard, steel singing, torchlight catching the blade, motion blur of deadly intent",
+        "mood": "dramatic",
+        "effects": ["speed_lines"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1555169062-013468b47731?w=1200&q=80"
+      },
+      "time_frozen": {
+        "id": "time_frozen",
+        "scene_description": "Beach scene frozen in time, rain drops suspended mid-air, samurai frozen mid-motion, desaturated colors with purple temporal glow at edges, eerie stillness",
+        "mood": "mysterious",
+        "effects": ["frozen", "particles"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1507400492013-162706c8c05e?w=1200&q=80"
+      },
+      "time_frozen_blade": {
+        "id": "time_frozen_blade",
+        "scene_description": "Frozen katana blade inches from throat, suspended rain drops around it, purple time-stop glow, moment of death paused",
+        "mood": "mysterious",
+        "effects": ["frozen", "particles", "vignette"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1507400492013-162706c8c05e?w=1200&q=80"
+      },
+      "bimbo_orb_battlefield": {
+        "id": "bimbo_orb_battlefield",
+        "scene_description": "Warm purple AI orb glowing in frozen beach scene, only source of color and movement, reassuring presence amid danger, particles swirling around it",
+        "mood": "hopeful",
+        "effects": ["frozen", "particles"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&q=80"
+      },
+      "samurai_surprised": {
+        "id": "samurai_surprised",
+        "scene_description": "Samurai face showing surprise, eyes widening, blade lowering slightly, rain resuming around him, grudging respect dawning",
+        "mood": "hopeful",
+        "effects": ["rain"],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1528360983277-13d401cdc186?w=1200&q=80"
+      },
+      "beach_dawn": {
+        "id": "beach_dawn",
+        "scene_description": "Beach scene with storm clearing, first light of dawn on horizon, shipwreck in background, sense of survival and new beginning",
+        "mood": "hopeful",
+        "effects": [],
+        "art_style": "dramatic",
+        "image_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1200&q=80"
+      }
+    },
+    "tutorial": {
+      "restaurant": {
+        "id": "tutorial_restaurant",
+        "scene_description": "Cozy ramen stall in Tokyo at night, warm lantern light, steam rising",
+        "image_url": "https://images.unsplash.com/photo-1554502078-ef0fc409efce?w=1200&q=80",
+        "mood": "warm"
+      }
+    }
+  }
+}

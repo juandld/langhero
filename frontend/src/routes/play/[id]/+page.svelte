@@ -2,8 +2,7 @@
   import { onMount } from 'svelte';
   import { onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import ScenarioDisplay from '$lib/components/ScenarioDisplay.svelte';
-  import DemoModeBanner from '$lib/components/DemoModeBanner.svelte';
+  import GameView from '$lib/components/game/GameView.svelte';
   import { addPlayTime, getRun, runsStore, setActiveRun, syncFromStorage, updateRun } from '$lib/runStore.js';
   import { storyStore } from '$lib/storyStore.js';
 
@@ -38,26 +37,6 @@
   $: if (mounted && runId && runId !== lastLoadedId) {
     lastLoadedId = runId;
     loadRun(runId);
-  }
-
-  function formatDuration(ms) {
-    const n = Number(ms);
-    if (!Number.isFinite(n) || n <= 0) return '0m';
-    const totalSec = Math.floor(n / 1000);
-    const hours = Math.floor(totalSec / 3600);
-    const mins = Math.floor((totalSec % 3600) / 60);
-    if (hours <= 0) return `${mins}m`;
-    return `${hours}h ${mins}m`;
-  }
-
-  function copyShareLink() {
-    if (!runId) return;
-    const url = `${window.location.origin}/play/${encodeURIComponent(runId)}`;
-    navigator.clipboard?.writeText(url).catch(() => {
-      try {
-        window.prompt('Copy this link:', url);
-      } catch (_) {}
-    });
   }
 
   function startTracking() {
@@ -105,20 +84,8 @@
   });
 </script>
 
-<main class="play">
-  <header class="top">
-    <div class="run">
-      <div class="title">{run?.title || 'Run'}</div>
-      <div class="meta">
-        <span>Time played: {formatDuration(run?.totalPlayMs || 0)}</span>
-        <span>·</span>
-        <button class="link" type="button" on:click={copyShareLink}>Copy share link</button>
-      </div>
-    </div>
-  </header>
-  <DemoModeBanner compact />
-
-  {#if error === 'save_not_found'}
+{#if error === 'save_not_found'}
+  <main class="play error-page">
     <section class="missing">
       <h1>Save not found on this device</h1>
       <p>
@@ -131,98 +98,72 @@
         <a class="secondaryLink" href="/demo">Try demo</a>
       </div>
     </section>
-  {:else}
-    <ScenarioDisplay />
-  {/if}
-</main>
+  </main>
+{:else}
+  <GameView />
+{/if}
 
 <style>
-  .play {
+  .play.error-page {
     font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     max-width: 760px;
     margin: 0 auto;
     padding: 1.5rem 1.25rem 2.25rem;
-  }
-
-  .top {
+    min-height: 100vh;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-
-  .run {
-    flex: 1;
-    min-width: 0;
-    text-align: center;
-  }
-
-  .title {
-    font-weight: 950;
-    letter-spacing: -0.02em;
-  }
-
-  .meta {
-    margin-top: 2px;
-    color: #64748b;
-    font-weight: 700;
-    font-size: 0.9rem;
-    display: flex;
-    gap: 8px;
     justify-content: center;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .link {
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    color: #111827;
-    text-decoration: underline;
-    font-weight: 900;
   }
 
   .missing {
     border: 1px solid #e2e8f0;
     background: #fff;
     border-radius: 18px;
-    padding: 16px;
+    padding: 24px;
+    text-align: center;
+    max-width: 400px;
   }
 
   .missing h1 {
-    margin: 0 0 6px;
-    font-size: 1.1rem;
+    margin: 0 0 12px;
+    font-size: 1.2rem;
+    color: #0f172a;
   }
 
   .missing p {
     margin: 0;
     color: #475569;
-    font-weight: 600;
+    font-weight: 500;
+    line-height: 1.5;
   }
 
   .actions {
-    margin-top: 14px;
+    margin-top: 20px;
     display: flex;
-    gap: 10px;
+    gap: 12px;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: center;
   }
 
   .primary {
     background: #111827;
     color: #fff;
     text-decoration: none;
-    padding: 10px 12px;
+    padding: 12px 20px;
     border-radius: 12px;
-    font-weight: 900;
+    font-weight: 700;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   }
 
   .secondaryLink {
     color: #111827;
-    font-weight: 900;
+    font-weight: 700;
     text-decoration: underline;
   }
 </style>
